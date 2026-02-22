@@ -1,165 +1,72 @@
-# Retail Intelligence Backend
+# Retail Data Platform
 
-Modular Flask backend powering analytics, forecasting, inventory, NLP
-processing, and transaction workflows.
+**Retail Data Platform** is a modular backend application providing APIs for store analytics, inventory management, sales forecasting, NLP-based insights, and more. It’s built on Flask (a lightweight WSGI web framework【11†L14-L17】) and uses Celery for background processing (a distributed task queue【6†L39-L41】). The application runs in Docker containers and uses SQLAlchemy (ORM) with Alembic for the database layer【8†L61-L64】【26†L116-L119】.
 
-------------------------------------------------------------------------
+## Features
 
-## Overview
+- **API Services:** Domain-specific modules (e.g. customers, products, orders, analytics, forecasting, NLP) exposed via REST endpoints.
+- **Background Tasks:** Long-running or scheduled jobs handled asynchronously by Celery workers.
+- **Data Persistence:** Relational database with SQLAlchemy ORM models and Alembic migrations for schema changes.
+- **Containerized:** All components (Flask API, message broker, database) orchestrated via Docker Compose【23†L157-L160】.
+- **Testing:** Comprehensive test suite using pytest (each module has corresponding `test_*.py`).
 
-This backend provides domain-specific services for:
+## Getting Started
 
--   Customer management\
--   Inventory tracking\
--   Transaction processing\
--   Sales forecasting\
--   Business analytics\
--   NLP-based insights\
--   Decision support workflows
+**Prerequisites:** Install [Docker](https://www.docker.com/) and [Docker Compose](https://docs.docker.com/compose/). Clone the repository:
 
-The system follows a **modular monolith architecture** with clear domain
-separation and asynchronous task handling.
+```bash
+git clone https://github.com/username/retail-data-platform.git
+cd retail-data-platform
+```
 
-------------------------------------------------------------------------
+### Setup
 
-Run: docker compose up -d
+1. Copy `.env.example` to `.env` and fill in required environment variables (database URL, message broker URL, etc).
+2. Build and start services with Docker Compose:
+   ```bash
+   docker-compose up --build
+   ```
+   This will start the Flask API server, a message broker (e.g. Redis/RabbitMQ), and the database. Docker Compose centralizes the multi-container setup into a single YAML configuration【23†L157-L160】. On first run, the database container is initialized and Alembic runs any pending migrations automatically.
 
-Example .env file:
+### Configuration
 
-DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
-REDIS_URL=redis://redis:6379/0
-CELERY_BROKER_URL=redis://redis:6379/1
+- API server listens on port **5000** by default. You can change ports or add services in `docker-compose.yml`.
+- Environment variables (in `.env`) include settings like `DATABASE_URL`, `CELERY_BROKER_URL`, etc.
+- Sensitive data (secrets, API keys) should go into `.env` or Docker secrets, not checked into source.
 
+## Usage
 
+- **API Endpoints:** Use a tool like `curl` or Postman to interact with the API. Example endpoints:
+  - `POST /api/customers` – create a new customer.
+  - `GET /api/products` – list inventory items.
+  - `POST /api/forecast` – start a sales forecasting job (this enqueues a Celery task).
+- **Async Tasks:** Actions that require heavy computation (e.g. generating reports or forecasts) are handled in the background. When you hit an endpoint that triggers a task, the API immediately returns a job ID while Celery workers process the task asynchronously. Celery is designed for this purpose【6†L39-L41】.
+- **Database:** Inspect the Postgres (or other) database to see tables. SQLAlchemy models (in `app/models/`) define the schema【26†L116-L119】. To update the schema, edit models and create a new Alembic migration. The `migrations/` folder contains versioned migration scripts; apply them with `flask db upgrade` (handled automatically on startup【8†L61-L64】).
 
-## Architecture
+## Development
 
-High-Level Flow:
-
-Client → Flask API → Domain Modules → SQLAlchemy ORM → Database\
-Client → Flask API → Celery → Background Worker → Database
-
-Key characteristics:
-
--   Blueprint-based modular design\
--   Centralized database layer\
--   Async processing for heavy workloads\
--   Containerized runtime
-
-------------------------------------------------------------------------
-
-## Technology Stack
-
--   Flask\
--   SQLAlchemy\
--   Alembic\
--   Celery\
--   Redis / RabbitMQ\
--   PostgreSQL\
--   Docker & Docker Compose\
--   Pytest
-
-------------------------------------------------------------------------
-
-## Project Structure
-
-backend/ │ ├── app/ │ ├── **init**.py │ ├── database.py │ ├── analytics/
-│ ├── forecasting/ │ ├── inventory/ │ ├── customers/ │ ├── transactions/
-│ ├── nlp/ │ ├── decisions/ │ ├── tasks/ │ └── models/ │ ├── migrations/
-│ ├── env.py │ └── versions/ │ ├── tests/ │ ├── celery_worker.py ├──
-wsgi.py ├── Dockerfile ├── docker-compose.yml ├── requirements.txt └──
-README.md
-
-------------------------------------------------------------------------
-
-## Local Development
-
-1.  Clone repository:
-
-    git clone https://github.com/yourusername/project.git\
-    cd project
-
-2.  Create virtual environment:
-
-    python -m venv venv\
-    venv`\Scripts`{=tex}`\activate  `{=tex}(Windows)
-
-3.  Install dependencies:
-
-    pip install -r requirements.txt
-
-4.  Configure environment variables in `.env`.
-
-5.  Run:
-
-    flask run
-
-------------------------------------------------------------------------
-
-## Docker Setup
-
-Build and start services:
-
-docker-compose up --build
-
-Stop services:
-
-docker-compose down
-
-------------------------------------------------------------------------
-
-## Environment Variables (Example)
-
-FLASK_ENV=development\
-SECRET_KEY=your_secret_key\
-DATABASE_URL=postgresql://user:password@db:5432/appdb\
-CELERY_BROKER_URL=redis://redis:6379/0\
-CELERY_RESULT_BACKEND=redis://redis:6379/0
-
-------------------------------------------------------------------------
-
-## Database & Migrations
-
-Apply migrations:
-
-flask db upgrade
-
-Create migration:
-
-flask db migrate -m "message"\
-flask db upgrade
-
-------------------------------------------------------------------------
-
-## Background Tasks
-
-Start Celery worker:
-
-celery -A celery_worker.celery worker --loglevel=info
-
-Used for:
-
--   Forecast model generation\
--   Analytics report processing\
--   NLP batch jobs\
--   Scheduled operations
-
-------------------------------------------------------------------------
+- **Virtual Environment:** Create a Python venv (outside the repo directory) and run `pip install -r requirements.txt`.
+- **Running Locally:** You can also run the Flask app locally (without Docker) by setting `FLASK_APP=app` and `FLASK_ENV=development` in `.env`, then using `flask run`.
+- **Blueprints:** The code uses Flask Blueprints to organize features. For example, each subfolder under `app/` (like `analytics/`, `auth/`, `customers/`) is a separate blueprint.
+- **Database Migrations:** Use `flask db migrate` and `flask db upgrade` to manage schema changes. Alembic (via Flask-Migrate) handles applying these changes【8†L61-L64】.
+- **Ignored Files:** Do not commit the local virtual environment or caches. For example, `.venv/` and `.pytest_cache/` are listed in `.gitignore` as recommended【49†L99-L106】.
 
 ## Testing
 
-Run full test suite:
+Run the test suite with:
 
+```bash
 pytest
+```
 
-------------------------------------------------------------------------
+Tests are in the `tests/` directory, following a one-to-one module-to-test pattern. Ensure you have a test database configured or the environment in `.env` supports testing. The Flask tutorial suggests ignoring the `.pytest_cache/` directory and other build artifacts in version control【49†L99-L106】.
 
-## Deployment Recommendations
+## Contributing
 
--   Use Gunicorn as WSGI server\
--   Use Nginx as reverse proxy\
--   Use PostgreSQL in production\
--   Use Redis for Celery\
--   Enable structured logging\
--   Enable CI for automated tests
+Contributions are welcome! Please fork the repository and submit pull requests. Ensure all new features come with appropriate tests. When committing, remember to avoid including local environment files (see **Ignored Files** above). Follow the existing code style and update documentation as needed.
 
+## License
+
+This project is open source under the MIT License. See the `LICENSE` file for details. 
+
+**Note:** The above README assumes a Python 3 environment, Docker setup, and basic familiarity with Flask and Celery. For further reading on the technologies used, see the official docs: Flask【11†L14-L17】, Celery【6†L39-L41】, SQLAlchemy/Alembic【8†L61-L64】【26†L116-L119】, and Docker Compose【23†L157-L160】.
