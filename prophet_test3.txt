@@ -1,0 +1,16 @@
+﻿.\venv\Scripts\python.exe : Importing plotly failed. Interactive plots will 
+not work.
+At line:1 char:1
++ .\venv\Scripts\python.exe -c "from prophet import Prophet; import pan ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Importing plotl... will not work 
+   .:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+10:27:32 - cmdstanpy - INFO - Chain [1] start processing
+10:27:33 - cmdstanpy - INFO - Chain [1] done processing
+SUCCESS! Prophet is working.
+           ds       yhat  yhat_lower  yhat_upper
+94 2023-04-05  97.529700   86.482596  108.100172
+95 2023-04-06  87.923576   77.064397   98.637519
+96 2023-04-07  85.381622   75.702742   96.407491

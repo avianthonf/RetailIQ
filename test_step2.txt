@@ -1,0 +1,45 @@
+﻿{
+    "data":  [
+                 {
+                     "action":  "Immediate Reorder",
+                     "confidence":  0.95,
+                     "numerical_reasoning":  {
+                                                 "formula":  "current_stock \u003c= reorder_level",
+                                                 "inputs":  {
+                                                                "current_stock":  1.0,
+                                                                "reorder_level":  3.0
+                                                            },
+                                                 "result":  1
+                                             },
+                     "priority":  5,
+                     "product_id":  1,
+                     "rationale":  "Stock (1) has hit or breached minimum safety level (3).",
+                     "rule_name":  "safety_stock_reorder",
+                     "time_sensitive":  true
+                 },
+                 {
+                     "action":  "Forecast Reorder",
+                     "confidence":  0.85,
+                     "numerical_reasoning":  {
+                                                 "formula":  "Q = (forecast_demand_7d + 1.65 * sigma * sqrt(lead_time_days)) - current_stock",
+                                                 "inputs":  {
+                                                                "current_stock":  1.0,
+                                                                "forecast_7d":  0.0,
+                                                                "lead_time_days":  3,
+                                                                "sigma":  2.07
+                                                            },
+                                                 "result":  4.91
+                                             },
+                     "priority":  4,
+                     "product_id":  1,
+                     "rationale":  "Demand + Safety bounds exceed current inventory.",
+                     "rule_name":  "reorder_alert",
+                     "time_sensitive":  true
+                 }
+             ],
+    "meta":  {
+                 "execution_time_ms":  7.02,
+                 "total_recommendations":  2
+             },
+    "status":  "success"
+}

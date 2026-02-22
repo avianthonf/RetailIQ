@@ -1,0 +1,65 @@
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=wsgi.py
+      - FLASK_ENV=development
+    depends_on:
+      - postgres
+      - redis
+    command: gunicorn --bind 0.0.0.0:5000 wsgi:app
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: retailiq
+      POSTGRES_PASSWORD: retailiq
+      POSTGRES_DB: retailiq
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  worker:
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A celery_worker.celery_app worker -l info
+
+  beat:
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A celery_worker.celery_app beat -l info
+
+volumes:
+  postgres_data:

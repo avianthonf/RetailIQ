@@ -1,0 +1,70 @@
+﻿.\venv\Scripts\python.exe : <frozen runpy>:128: RuntimeWarning: 
+'cmdstanpy.install_cmdstan' found in sys.modules after import of package 
+'cmdstanpy', but prior to execution of 'cmdstanpy.install_cmdstan'; this 
+may result in unpredictable behaviour
+At line:1 char:1
++ .\venv\Scripts\python.exe -m cmdstanpy.install_cmdstan 2>&1 | Out-Fil 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (<frozen runpy>:...table beha 
+   viour:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Traceback (most recent call last):
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\utils\command.py", line 43, in do_command
+    proc = subprocess.Popen(
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\avian\AppData\Local\Programs\Python\Python311\Lib\subproc
+ess.py", line 1022, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "C:\Users\avian\AppData\Local\Programs\Python\Python311\Lib\subproc
+ess.py", line 1491, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] The system cannot find the file specified
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 284, in build
+    do_command(cmd, fd_out=None)
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\utils\command.py", line 80, in do_command
+    raise RuntimeError(msg) from e
+RuntimeError: Command: ['mingw32-make', 'build', '-j1']
+failed with error [WinError 2] The system cannot find the file specified
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 710, in <module>
+    __main__()
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 706, in __main__
+    run_install(InstallationSettings(**args))
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 632, in run_install
+    install_version(
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 426, in install_version
+    build(verbose, progress=progress, cores=cores)
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\install_cmdstan.py", line 288, in build
+    raise CmdStanInstallError(f'Command "make build" failed\n{str(e)}')
+CmdStanInstallError: Command "make build" failed
+Command: ['mingw32-make', 'build', '-j1']
+failed with error [WinError 2] The system cannot find the file specified
+
+CmdStan install directory: C:\Users\avian\.cmdstan
+Installing CmdStan version: 2.38.0
+Downloading CmdStan version 2.38.0
+Download successful, file: C:\Users\avian\AppData\Local\Temp\tmployvoyk9
+Extracting distribution
+Unpacked download as cmdstan-2.38.0
+Building version cmdstan-2.38.0, may take several minutes, depending on your system.

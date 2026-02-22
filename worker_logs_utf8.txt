@@ -1,0 +1,50 @@
+﻿worker-1  |     return meth(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/sql/elements.py", line 515, in _execute_on_connection
+worker-1  |     return connection._execute_clauseelement(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1640, in _execute_clauseelement
+worker-1  |     ret = self._execute_context(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+worker-1  |     return self._exec_single_context(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+worker-1  |     self._handle_dbapi_exception(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 2353, in _handle_dbapi_exception
+worker-1  |     raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+worker-1  |     self.dialect.do_execute(
+worker-1  |   File "/usr/local/lib/python3.10/site-packages/sqlalchemy/engine/default.py", line 924, in do_execute
+worker-1  |     cursor.execute(statement, parameters)
+worker-1  | sqlalchemy.exc.ProgrammingError: (psycopg2.errors.GroupingError) column "t.store_id" must appear in the GROUP BY clause or be used in an aggregate function
+worker-1  | LINE 6:                     t.store_id,
+worker-1  |                             ^
+worker-1  | 
+worker-1  | [SQL: 
+worker-1  |                 INSERT INTO daily_store_summary (date, store_id, revenue, profit,
+worker-1  |                                                   transaction_count, avg_basket, units_sold)
+worker-1  |                 SELECT
+worker-1  |                     %(target_date)s,
+worker-1  |                     t.store_id,
+worker-1  |                     COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0),
+worker-1  |                     COALESCE(SUM(ti.quantity * (ti.selling_price - ti.cost_price_at_time) - ti.discount_amount), 0),
+worker-1  |                     COUNT(DISTINCT t.transaction_id),
+worker-1  |                     CASE WHEN COUNT(DISTINCT t.transaction_id) > 0
+worker-1  |                          THEN COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0)
+worker-1  |                               / COUNT(DISTINCT t.transaction_id)
+worker-1  |                          ELSE 0 END,
+worker-1  |                     COALESCE(SUM(ti.quantity), 0)
+worker-1  |                 FROM transactions t
+worker-1  |                 JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
+worker-1  |                 WHERE t.store_id = %(store_id)s
+worker-1  |                   AND DATE(t.created_at) = %(target_date)s
+worker-1  |                   AND t.is_return = FALSE
+worker-1  |                 ON CONFLICT (date, store_id) DO UPDATE SET
+worker-1  |                     revenue            = EXCLUDED.revenue,
+worker-1  |                     profit             = EXCLUDED.profit,
+worker-1  |                     transaction_count  = EXCLUDED.transaction_count,
+worker-1  |                     avg_basket         = EXCLUDED.avg_basket,
+worker-1  |                     units_sold         = EXCLUDED.units_sold
+worker-1  |             ]
+worker-1  | [parameters: {'target_date': '2026-02-21', 'store_id': 1}]
+worker-1  | (Background on this error at: https://sqlalche.me/e/20/f405)
+worker-1  | [2026-02-21 10:50:41,347: INFO/MainProcess] Task tasks.evaluate_alerts[40bbba14-d6c5-4777-8620-a322138028a4] received
+worker-1  | [2026-02-21 10:50:41,354: INFO/ForkPoolWorker-8] tasks.evaluate_alerts[40bbba14-d6c5-4777-8620-a322138028a4]: {"task": "evaluate_alerts", "ts": "2026-02-21T10:50:41.354113+00:00", "store_id": 1, "status": "done", "new_alerts": 0}
+worker-1  | [2026-02-21 10:50:41,354: INFO/ForkPoolWorker-8] Task tasks.evaluate_alerts[40bbba14-d6c5-4777-8620-a322138028a4] succeeded in 0.006501819000732212s: None

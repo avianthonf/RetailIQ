@@ -1,0 +1,11 @@
+﻿.\venv\Scripts\python.exe : Importing plotly failed. Interactive plots 
+will not work.
+At line:1 char:1
++ .\venv\Scripts\python.exe -c "import prophet; print('Prophet version: 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Importing plotl... will not  
+   work.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Prophet version: 1.1.5

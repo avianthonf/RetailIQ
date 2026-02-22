@@ -1,0 +1,235 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.2, pluggy-1.6.0 -- D:\Files\Desktop\TyProject\Backend\venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Files\Desktop\TyProject\Backend
+collecting ... collected 99 items
+
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_correct_sums PASSED [  1%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_7d_moving_avg_full_window PASSED [  2%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_cold_start_partial_ma PASSED [  3%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_group_by_week PASSED [  4%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_requires_owner PASSED [  5%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_no_data_returns_empty PASSED [  6%]
+tests/test_analytics.py::TestProfitEndpoint::test_profit_margin_pct PASSED [  7%]
+tests/test_analytics.py::TestProfitEndpoint::test_profit_zero_revenue_margin PASSED [  8%]
+tests/test_analytics.py::TestTopProductsEndpoint::test_top_products_by_revenue PASSED [  9%]
+tests/test_analytics.py::TestTopProductsEndpoint::test_top_products_invalid_metric PASSED [ 10%]
+tests/test_analytics.py::TestCategoryBreakdown::test_share_pct_sums_to_100 PASSED [ 11%]
+tests/test_analytics.py::TestContributionEndpoint::test_contribution_pareto_flag PASSED [ 12%]
+tests/test_analytics.py::TestContributionEndpoint::test_contribution_near_zero_denominator PASSED [ 13%]
+tests/test_analytics.py::TestContributionEndpoint::test_price_volume_decomposition_fields PASSED [ 14%]
+tests/test_analytics.py::TestDiagnosticsEndpoint::test_trend_deviation_flagged PASSED [ 15%]
+tests/test_analytics.py::TestDiagnosticsEndpoint::test_diagnostics_has_all_keys PASSED [ 16%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_structure PASSED [ 17%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_insights_non_empty PASSED [ 18%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_alerts_summary_has_total PASSED [ 19%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_with_seeded_data PASSED [ 20%]
+tests/test_audit.py::test_phase_1_analytics_e2e PASSED                   [ 21%]
+tests/test_audit.py::test_phase_2_prophet_vs_fallback PASSED             [ 22%]
+tests/test_customers.py::test_create_customer_success PASSED             [ 23%]
+tests/test_customers.py::test_create_customer_invalid_mobile PASSED      [ 24%]
+tests/test_customers.py::test_duplicate_mobile_same_store_rejected PASSED [ 25%]
+tests/test_customers.py::test_duplicate_mobile_different_store_allowed PASSED [ 26%]
+tests/test_customers.py::test_get_customer PASSED                        [ 27%]
+tests/test_customers.py::test_get_customer_not_found PASSED              [ 28%]
+tests/test_customers.py::test_update_customer PASSED                     [ 29%]
+tests/test_customers.py::test_list_customers PASSED                      [ 30%]
+tests/test_customers.py::test_list_customers_name_search PASSED          [ 31%]
+tests/test_customers.py::test_customer_transactions PASSED               [ 32%]
+tests/test_customers.py::test_customer_summary_basic PASSED              [ 33%]
+tests/test_customers.py::test_not_repeat_customer_two_txns PASSED        [ 34%]
+tests/test_customers.py::test_repeat_customer_three_txns_in_window PASSED [ 35%]
+tests/test_customers.py::test_repeat_customer_spread_over_multiple_windows PASSED [ 36%]
+tests/test_customers.py::test_top_customers_revenue PASSED               [ 37%]
+tests/test_customers.py::test_top_customers_visits PASSED                [ 38%]
+tests/test_customers.py::test_analytics_new_customer PASSED              [ 39%]
+tests/test_customers.py::test_analytics_repeat_customer PASSED           [ 40%]
+tests/test_customers.py::test_analytics_repeat_rate PASSED               [ 41%]
+tests/test_customers.py::test_unauthenticated_returns_401 PASSED         [ 42%]
+tests/test_forecasting.py::TestRegimeDetection::test_stable_regime PASSED [ 43%]
+tests/test_forecasting.py::TestRegimeDetection::test_volatile_regime PASSED [ 44%]
+tests/test_forecasting.py::TestRegimeDetection::test_trending_regime PASSED [ 45%]
+tests/test_forecasting.py::TestRegimeDetection::test_seasonal_regime PASSED [ 46%]
+tests/test_forecasting.py::TestRegimeDetection::test_too_short_series_defaults_stable PASSED [ 47%]
+tests/test_forecasting.py::TestRegimeDetection::test_volatile_beats_trending PASSED [ 48%]
+tests/test_forecasting.py::TestRunForecast::test_short_series_uses_linear_regression PASSED [ 49%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_points_non_negative PASSED [ 50%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_interval_ordering PASSED [ 51%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_dates_sequential PASSED [ 52%]
+tests/test_forecasting.py::TestRunForecast::test_training_window_days_stored PASSED [ 53%]
+tests/test_forecasting.py::TestRunForecast::test_prophet_fallback_to_linear PASSED [ 54%]
+tests/test_forecasting.py::TestRunForecast::test_prophet_used_when_60_days PASSED [ 55%]
+tests/test_forecasting.py::TestRunForecast::test_mismatched_dates_values_raises PASSED [ 56%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_404_empty_cache PASSED [ 57%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_200_with_data PASSED [ 58%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_meta_contains_regime PASSED [ 59%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_404_unknown_product PASSED [ 60%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_404_no_cache PASSED [ 61%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_200_with_data PASSED [ 62%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_reorder_suggestion PASSED [ 63%]
+tests/test_forecasting.py::TestUpsertForecast::test_forecast_cache_populated PASSED [ 64%]
+tests/test_forecasting.py::TestUpsertForecast::test_upsert_idempotent PASSED [ 65%]
+tests/test_inventory.py::test_create_product_success PASSED              [ 66%]
+tests/test_inventory.py::test_create_product_custom_sku PASSED           [ 67%]
+tests/test_inventory.py::test_create_product_staff_forbidden PASSED      [ 68%]
+tests/test_inventory.py::test_create_product_selling_below_cost_rejected PASSED [ 69%]
+tests/test_inventory.py::test_list_products PASSED                       [ 70%]
+tests/test_inventory.py::test_list_products_low_stock_filter PASSED      [ 71%]
+tests/test_inventory.py::test_list_products_category_filter PASSED       [ 72%]
+tests/test_inventory.py::test_get_product PASSED                         [ 73%]
+tests/test_inventory.py::test_get_product_not_found PASSED               [ 74%]
+tests/test_inventory.py::test_update_product PASSED                      [ 75%]
+tests/test_inventory.py::test_soft_delete_product PASSED                 [ 76%]
+tests/test_inventory.py::test_stock_update_increments_stock PASSED       [ 77%]
+tests/test_inventory.py::test_stock_update_with_cost_price_update PASSED [ 78%]
+tests/test_inventory.py::test_stock_audit_creates_records PASSED         [ 79%]
+tests/test_inventory.py::test_stock_audit_staff_forbidden PASSED         [ 80%]
+tests/test_inventory.py::test_price_history_returned PASSED              [ 81%]
+tests/test_inventory.py::test_margin_warning_alert_created PASSED        [ 82%]
+tests/test_inventory.py::test_get_alerts PASSED                          [ 83%]
+tests/test_inventory.py::test_unauthenticated_returns_401 PASSED         [ 84%]
+tests/test_store.py::test_get_store_profile PASSED                       [ 85%]
+tests/test_store.py::test_update_store_profile_and_seed_categories PASSED [ 86%]
+tests/test_store.py::test_staff_cannot_update_profile PASSED             [ 87%]
+tests/test_store.py::test_create_category PASSED                         [ 88%]
+tests/test_store.py::test_max_categories_limit PASSED                    [ 89%]
+tests/test_store.py::test_get_categories PASSED                          [ 90%]
+tests/test_store.py::test_update_category PASSED                         [ 91%]
+tests/test_store.py::test_delete_category_with_products PASSED           [ 92%]
+tests/test_store.py::test_delete_category_success PASSED                 [ 93%]
+tests/test_store.py::test_update_tax_config PASSED                       [ 94%]
+tests/test_tasks.py::test_rebuild_daily_aggregates_and_evaluate_alerts PASSED [ 95%]
+tests/test_transactions.py::test_single_sale FAILED                      [ 96%]
+tests/test_transactions.py::test_batch_idempotent FAILED                 [ 97%]
+tests/test_transactions.py::test_staff_date_restriction PASSED           [ 98%]
+tests/test_transactions.py::test_return_transaction FAILED               [100%]
+
+================================== FAILURES ===================================
+______________________________ test_single_sale _______________________________
+
+client = <FlaskClient <Flask 'app'>>
+init_db = {'owner': <app.models.User object at 0x000002734E3F4F90>, 'prod1': <app.models.Product object at 0x000002734E5D1110>, 'prod2': <app.models.Product object at 0x000002734E5D2950>, 'staff': <app.models.User object at 0x000002734E4F8590>, ...}
+auth_headers = {'owner': {'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJzdG9yZV9pZCI6MSwicm9sZSI6I...M4ODx5U13UBLbJxEbJEqv5P2vUsWJ_YgSecRlfBm4yHmtRNRdvn9XA8CyI1KUr0LcSOSAyvRzaexzRQo2YsiNug3IpJbmyBj8vb_7ejFJrFcH6YXPcPw'}}
+
+    def test_single_sale(client, init_db, auth_headers):
+        txn_id = str(uuid.uuid4())
+        payload = {
+            "transaction_id": txn_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payment_mode": "CASH",
+            "line_items": [
+                {
+                    "product_id": init_db['prod1'].product_id,
+                    "quantity": 2.0,
+                    "selling_price": 10.0
+                }
+            ]
+        }
+    
+        resp = client.post('/api/v1/transactions', json=payload, headers=auth_headers['staff'])
+>       assert resp.status_code == 201
+E       assert 500 == 201
+E        +  where 500 = <WrapperTestResponse streamed [500 INTERNAL SERVER ERROR]>.status_code
+
+tests\test_transactions.py:111: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  kombu.connection:connection.py:671 No hostname was supplied. Reverting to default 'localhost'
+____________________________ test_batch_idempotent ____________________________
+
+client = <FlaskClient <Flask 'app'>>
+init_db = {'owner': <app.models.User object at 0x000002734E6A5D50>, 'prod1': <app.models.Product object at 0x000002734E528950>, 'prod2': <app.models.Product object at 0x000002734E5CAB10>, 'staff': <app.models.User object at 0x000002734E60CA90>, ...}
+auth_headers = {'owner': {'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJzdG9yZV9pZCI6MSwicm9sZSI6I...HHSit9-aFpAU6kx7kkS24eP5fqapmNyTC7KKp5e6gG9ykvlBs_kcSoC3DMKWgQyKsfDBmK3CDC_O1LA9GW9wonSUjEWwSchoVWpOfBbzCdMbghoyRwZA'}}
+
+    def test_batch_idempotent(client, init_db, auth_headers):
+        txn_id_1 = str(uuid.uuid4())
+        txn_id_2 = str(uuid.uuid4())
+    
+        payload = {
+            "transactions": [
+                {
+                    "transaction_id": txn_id_1,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payment_mode": "CARD",
+                    "line_items": [
+                        {"product_id": init_db['prod2'].product_id, "quantity": 1.0, "selling_price": 20.0}
+                    ]
+                },
+                {
+                    "transaction_id": txn_id_2,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "payment_mode": "UPI",
+                    "line_items": [
+                        {"product_id": init_db['prod1'].product_id, "quantity": 5.0, "selling_price": 10.0}
+                    ]
+                }
+            ]
+        }
+    
+        resp = client.post('/api/v1/transactions/batch', json=payload, headers=auth_headers['owner'])
+        assert resp.status_code == 200
+>       assert resp.json['data']['accepted'] == 2
+E       assert 0 == 2
+
+tests\test_transactions.py:147: AssertionError
+___________________________ test_return_transaction ___________________________
+
+client = <FlaskClient <Flask 'app'>>
+init_db = {'owner': <app.models.User object at 0x000002734E647E50>, 'prod1': <app.models.Product object at 0x000002734ED17610>, 'prod2': <app.models.Product object at 0x000002734ED156D0>, 'staff': <app.models.User object at 0x000002734ED07B10>, ...}
+auth_headers = {'owner': {'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxLCJzdG9yZV9pZCI6MSwicm9sZSI6I..._dT9nwEbfliYCGAkkcvw4JIaYs_XlDzYUMaQGgiKoT5kovyc_sFEpNkTSes3cacSVamEEBvviLTjY7KRp32xLfAs5hRbjcpvI5m0yeIMfuNG7PNHFAOw'}}
+
+    def test_return_transaction(client, init_db, auth_headers):
+        txn_id = str(uuid.uuid4())
+        payload = {
+            "transaction_id": txn_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payment_mode": "CASH",
+            "line_items": [
+                {
+                    "product_id": init_db['prod1'].product_id,
+                    "quantity": 10.0,
+                    "selling_price": 10.0
+                }
+            ]
+        }
+        client.post('/api/v1/transactions', json=payload, headers=auth_headers['staff'])
+        prod1 = db.session.get(Product, init_db['prod1'].product_id)
+>       assert float(prod1.current_stock) == 40.0
+E       AssertionError: assert 50.0 == 40.0
+E        +  where 50.0 = float(Decimal('50.000'))
+E        +    where Decimal('50.000') = <app.models.Product object at 0x000002734ED17610>.current_stock
+
+tests\test_transactions.py:211: AssertionError
+============================== warnings summary ===============================
+app\auth\schemas.py:31
+  D:\Files\Desktop\TyProject\Backend\app\auth\schemas.py:31: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(['staff']), default='staff')
+
+tests/test_analytics.py: 20 warnings
+tests/test_audit.py: 2 warnings
+tests/test_customers.py: 20 warnings
+tests/test_forecasting.py: 9 warnings
+tests/test_inventory.py: 19 warnings
+tests/test_store.py: 10 warnings
+tests/test_tasks.py: 1 warning
+  D:\Files\Desktop\TyProject\Backend\tests\conftest.py:79: SAWarning: Can't sort tables for DROP; an unresolvable foreign key dependency exists between tables: stores, users; and backend does not support ALTER.  To restore at least a partial sort, apply use_alter=True to ForeignKey and ForeignKeyConstraint objects involved in the cycle to mark these as known cycles that will be ignored.
+    Base.metadata.drop_all(_db.engine)
+
+tests/test_audit.py::test_phase_2_prophet_vs_fallback
+tests/test_audit.py::test_phase_2_prophet_vs_fallback
+tests/test_forecasting.py::TestRegimeDetection::test_stable_regime
+  D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\statsmodels\tsa\stattools.py:693: RuntimeWarning: invalid value encountered in divide
+    acf = avf[: nlags + 1] / avf[0]
+
+tests/test_transactions.py::test_single_sale
+tests/test_transactions.py::test_batch_idempotent
+tests/test_transactions.py::test_staff_date_restriction
+tests/test_transactions.py::test_return_transaction
+  D:\Files\Desktop\TyProject\Backend\tests\test_transactions.py:51: SAWarning: Can't sort tables for DROP; an unresolvable foreign key dependency exists between tables: stores, users; and backend does not support ALTER.  To restore at least a partial sort, apply use_alter=True to ForeignKey and ForeignKeyConstraint objects involved in the cycle to mark these as known cycles that will be ignored.
+    Base.metadata.drop_all(db.engine)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_transactions.py::test_single_sale - assert 500 == 201
+FAILED tests/test_transactions.py::test_batch_idempotent - assert 0 == 2
+FAILED tests/test_transactions.py::test_return_transaction - AssertionError: ...
+============ 3 failed, 96 passed, 89 warnings in 145.05s (0:02:25) ============

@@ -1,0 +1,24 @@
+﻿.\venv\Scripts\python.exe : Importing plotly failed. Interactive plots 
+will not work.
+At line:1 char:1
++ .\venv\Scripts\python.exe -c "from datetime import date, timedelta; f 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Importing plotl... will not  
+   work.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+10:30:51 - cmdstanpy - INFO - Chain [1] start processing
+10:31:20 - cmdstanpy - INFO - Chain [1] done processing
+Model type: prophet
+Regime: Trending
+Training window: 90
+Points:
+  Date            Mean    Lower   Upper
+  2023-04-01   145.00   145.00   145.00
+  2023-04-02   145.50   145.50   145.50
+  2023-04-03   146.00   146.00   146.00
+  2023-04-04   146.50   146.50   146.50
+  2023-04-05   147.00   147.00   147.00
+  2023-04-06   147.50   147.50   147.50
+  2023-04-07   148.00   148.00   148.00

@@ -1,0 +1,71 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\Files\Desktop\TyProject\Backend
+collected 1 item
+run-last-failure: rerun previous 1 failure (skipped 10 files)
+
+tests\test_audit.py F                                                    [100%]
+
+================================== FAILURES ===================================
+______________________ test_phase_2_prophet_vs_fallback _______________________
+venv\Lib\site-packages\redis\connection.py:276: in connect
+    sock = self.retry.call_with_retry(
+venv\Lib\site-packages\redis\retry.py:46: in call_with_retry
+    return do()
+           ^^^^
+venv\Lib\site-packages\redis\connection.py:277: in <lambda>
+    lambda: self._connect(), lambda error: self.disconnect(error)
+            ^^^^^^^^^^^^^^^
+venv\Lib\site-packages\redis\connection.py:607: in _connect
+    for res in socket.getaddrinfo(
+C:\Users\avian\AppData\Local\Programs\Python\Python311\Lib\socket.py:961: in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+tests\test_audit.py:72: in test_phase_2_prophet_vs_fallback
+    forecast_store(test_store.store_id)
+venv\Lib\site-packages\celery\local.py:182: in __call__
+    return self._get_current_object()(*a, **kw)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\celery\app\task.py:411: in __call__
+    return self.run(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\celery\app\autoretry.py:60: in run
+    ret = task.retry(exc=exc, **retry_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\celery\app\task.py:720: in retry
+    raise_with_context(exc or Retry('Task can be retried', None))
+venv\Lib\site-packages\celery\app\autoretry.py:38: in run
+    return task._orig_run(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\tasks\tasks.py:406: in forecast_store
+    with _RedisLock(lock_key, ttl=1800) as acquired:
+app\tasks\tasks.py:32: in __enter__
+    self.acquired = bool(self._r.set(self._key, '1', nx=True, ex=self._ttl))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\redis\commands\core.py:2342: in set
+    return self.execute_command("SET", *pieces, **options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\redis\client.py:542: in execute_command
+    conn = self.connection or pool.get_connection(command_name, **options)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+venv\Lib\site-packages\redis\connection.py:1109: in get_connection
+    connection.connect()
+venv\Lib\site-packages\redis\connection.py:282: in connect
+    raise ConnectionError(self._error_message(e))
+E   redis.exceptions.ConnectionError: Error 11001 connecting to redis:6379. getaddrinfo failed.
+============================== warnings summary ===============================
+app\auth\schemas.py:31
+  D:\Files\Desktop\TyProject\Backend\app\auth\schemas.py:31: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(['staff']), default='staff')
+
+tests/test_audit.py::test_phase_2_prophet_vs_fallback
+  D:\Files\Desktop\TyProject\Backend\tests\conftest.py:79: SAWarning: Can't sort tables for DROP; an unresolvable foreign key dependency exists between tables: stores, users; and backend does not support ALTER.  To restore at least a partial sort, apply use_alter=True to ForeignKey and ForeignKeyConstraint objects involved in the cycle to mark these as known cycles that will be ignored.
+    Base.metadata.drop_all(_db.engine)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_audit.py::test_phase_2_prophet_vs_fallback - redis.exceptio...
+======================== 1 failed, 2 warnings in 3.19s ========================

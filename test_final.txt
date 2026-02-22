@@ -1,0 +1,66 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.2, pluggy-1.6.0 -- D:\Files\Desktop\TyProject\Backend\venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Files\Desktop\TyProject\Backend
+collecting ... collected 43 items
+
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_correct_sums PASSED [  2%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_7d_moving_avg_full_window PASSED [  4%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_cold_start_partial_ma PASSED [  6%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_group_by_week PASSED [  9%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_requires_owner PASSED [ 11%]
+tests/test_analytics.py::TestRevenueEndpoint::test_revenue_no_data_returns_empty PASSED [ 13%]
+tests/test_analytics.py::TestProfitEndpoint::test_profit_margin_pct PASSED [ 16%]
+tests/test_analytics.py::TestProfitEndpoint::test_profit_zero_revenue_margin PASSED [ 18%]
+tests/test_analytics.py::TestTopProductsEndpoint::test_top_products_by_revenue PASSED [ 20%]
+tests/test_analytics.py::TestTopProductsEndpoint::test_top_products_invalid_metric PASSED [ 23%]
+tests/test_analytics.py::TestCategoryBreakdown::test_share_pct_sums_to_100 PASSED [ 25%]
+tests/test_analytics.py::TestContributionEndpoint::test_contribution_pareto_flag PASSED [ 27%]
+tests/test_analytics.py::TestContributionEndpoint::test_contribution_near_zero_denominator PASSED [ 30%]
+tests/test_analytics.py::TestContributionEndpoint::test_price_volume_decomposition_fields PASSED [ 32%]
+tests/test_analytics.py::TestDiagnosticsEndpoint::test_trend_deviation_flagged PASSED [ 34%]
+tests/test_analytics.py::TestDiagnosticsEndpoint::test_diagnostics_has_all_keys PASSED [ 37%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_structure PASSED [ 39%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_insights_non_empty PASSED [ 41%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_alerts_summary_has_total PASSED [ 44%]
+tests/test_analytics.py::TestDashboardEndpoint::test_dashboard_with_seeded_data PASSED [ 46%]
+tests/test_forecasting.py::TestRegimeDetection::test_stable_regime PASSED [ 48%]
+tests/test_forecasting.py::TestRegimeDetection::test_volatile_regime PASSED [ 51%]
+tests/test_forecasting.py::TestRegimeDetection::test_trending_regime PASSED [ 53%]
+tests/test_forecasting.py::TestRegimeDetection::test_seasonal_regime PASSED [ 55%]
+tests/test_forecasting.py::TestRegimeDetection::test_too_short_series_defaults_stable PASSED [ 58%]
+tests/test_forecasting.py::TestRegimeDetection::test_volatile_beats_trending PASSED [ 60%]
+tests/test_forecasting.py::TestRunForecast::test_short_series_uses_linear_regression PASSED [ 62%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_points_non_negative PASSED [ 65%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_interval_ordering PASSED [ 67%]
+tests/test_forecasting.py::TestRunForecast::test_forecast_dates_sequential PASSED [ 69%]
+tests/test_forecasting.py::TestRunForecast::test_training_window_days_stored PASSED [ 72%]
+tests/test_forecasting.py::TestRunForecast::test_prophet_fallback_to_linear PASSED [ 74%]
+tests/test_forecasting.py::TestRunForecast::test_prophet_used_when_60_days PASSED [ 76%]
+tests/test_forecasting.py::TestRunForecast::test_mismatched_dates_values_raises PASSED [ 79%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_404_empty_cache PASSED [ 81%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_200_with_data PASSED [ 83%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_store_forecast_meta_contains_regime PASSED [ 86%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_404_unknown_product PASSED [ 88%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_404_no_cache PASSED [ 90%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_200_with_data PASSED [ 93%]
+tests/test_forecasting.py::TestForecastingEndpoints::test_sku_forecast_reorder_suggestion PASSED [ 95%]
+tests/test_forecasting.py::TestUpsertForecast::test_forecast_cache_populated PASSED [ 97%]
+tests/test_forecasting.py::TestUpsertForecast::test_upsert_idempotent PASSED [100%]
+
+============================== warnings summary ===============================
+app\auth\schemas.py:31
+  D:\Files\Desktop\TyProject\Backend\app\auth\schemas.py:31: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(['staff']), default='staff')
+
+tests/test_analytics.py: 20 warnings
+tests/test_forecasting.py: 9 warnings
+  D:\Files\Desktop\TyProject\Backend\tests\conftest.py:83: SAWarning: Cannot correctly sort tables; there are unresolvable cycles between tables "stores, users", which is usually caused by mutually dependent foreign key constraints.  Foreign key constraints involving these tables will not be considered; this warning may raise an error in a future release.
+    for table in reversed(Base.metadata.sorted_tables):
+
+tests/test_forecasting.py::TestRegimeDetection::test_stable_regime
+  D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\statsmodels\tsa\stattools.py:693: RuntimeWarning: invalid value encountered in divide
+    acf = avf[: nlags + 1] / avf[0]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 43 passed, 31 warnings in 108.90s (0:01:48) =================

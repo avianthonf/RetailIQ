@@ -1,0 +1,43 @@
+﻿{
+    "data":  [
+                 {
+                     "action":  "Immediate Reorder",
+                     "confidence":  0.95,
+                     "numerical_reasoning":  {
+                                                 "formula":  "current_stock \u003c= reorder_level",
+                                                 "inputs":  {
+                                                                "current_stock":  4.0,
+                                                                "reorder_level":  5.0
+                                                            },
+                                                 "result":  1
+                                             },
+                     "priority":  5,
+                     "product_id":  1,
+                     "rationale":  "Stock (4) has hit or breached minimum safety level (5).",
+                     "rule_name":  "safety_stock_reorder",
+                     "time_sensitive":  true
+                 },
+                 {
+                     "action":  "Discount / Liquidate",
+                     "confidence":  0.9,
+                     "numerical_reasoning":  {
+                                                 "formula":  "sum_30d == 0 and current_stock \u003e 0",
+                                                 "inputs":  {
+                                                                "current_stock":  4.0,
+                                                                "sum_30d":  0.0
+                                                            },
+                                                 "result":  1
+                                             },
+                     "priority":  2,
+                     "product_id":  1,
+                     "rationale":  "0 units sold in the last 30 calendar days with 4 units idle.",
+                     "rule_name":  "slow_mover",
+                     "time_sensitive":  false
+                 }
+             ],
+    "meta":  {
+                 "execution_time_ms":  5.84,
+                 "total_recommendations":  2
+             },
+    "status":  "success"
+}

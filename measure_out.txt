@@ -1,0 +1,28 @@
+﻿docker : /usr/local/lib/python3.10/site
+-packages/statsmodels/tsa/stattools.py:
+693: RuntimeWarning: invalid value 
+encountered in divide
+At line:1 char:1
++ docker compose exec app python 
+measure.py 2>&1 | Out-File -FilePath m 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
+    + CategoryInfo          : NotSpeci 
+   fied: (/usr/local/lib/...tered in   
+  divide:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCo 
+   mmandError
+ 
+  acf = avf[: nlags + 1] / avf[0]
+Importing plotly failed. Interactive 
+plots will not work.
+/usr/local/lib/python3.10/site-packages
+/statsmodels/tsa/stattools.py:693: 
+RuntimeWarning: invalid value 
+encountered in divide
+  acf = avf[: nlags + 1] / avf[0]
+Logged in successfully via API.
+Dashboard GET /api/v1/analytics/dashboard speed: 4.18ms. Status: 200
+Forecast cache before batch job: 0
+Forecast cache after batch job: 14

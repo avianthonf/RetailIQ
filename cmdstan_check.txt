@@ -1,0 +1,16 @@
+﻿.\venv\Scripts\python.exe : Traceback (most recent call last):
+At line:1 char:1
++ .\venv\Scripts\python.exe -c "import cmdstanpy; print('cmdstanpy:', c 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call  
+   last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+  File "D:\Files\Desktop\TyProject\Backend\venv\Lib\site-packages\cmdstanp
+y\utils\cmdstan.py", line 185, in cmdstan_path
+    raise ValueError(
+ValueError: No CmdStan installation found, run command 
+"install_cmdstan"or (re)activate your conda environment!
+cmdstanpy: 1.3.0

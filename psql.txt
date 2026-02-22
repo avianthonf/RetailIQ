@@ -1,0 +1,20 @@
+﻿                                             Table "public.forecast_cache"
+        Column        |            Type             | Collation | Nullable |                  Default                   
+----------------------+-----------------------------+-----------+----------+--------------------------------------------
+ id                   | integer                     |           | not null | nextval('forecast_cache_id_seq'::regclass)
+ store_id             | integer                     |           |          | 
+ product_id           | integer                     |           |          | 
+ forecast_date        | date                        |           |          | 
+ forecast_value       | numeric(12,2)               |           |          | 
+ lower_bound          | numeric(12,2)               |           |          | 
+ upper_bound          | numeric(12,2)               |           |          | 
+ regime               | character varying(20)       |           |          | 
+ generated_at         | timestamp without time zone |           |          | 
+ model_type           | character varying(30)       |           |          | 
+ training_window_days | integer                     |           |          | 
+Indexes:
+    "forecast_cache_pkey" PRIMARY KEY, btree (id)
+Foreign-key constraints:
+    "forecast_cache_product_id_fkey" FOREIGN KEY (product_id) REFERENCES products(product_id)
+    "forecast_cache_store_id_fkey" FOREIGN KEY (store_id) REFERENCES stores(store_id)
+

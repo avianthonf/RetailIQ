@@ -1,0 +1,21 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\Files\Desktop\TyProject\Backend
+collected 3 items
+run-last-failure: rerun previous 3 failures (skipped 12 files)
+
+tests\test_transactions.py ...                                           [100%]
+
+============================== warnings summary ===============================
+app\auth\schemas.py:31
+  D:\Files\Desktop\TyProject\Backend\app\auth\schemas.py:31: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(['staff']), default='staff')
+
+tests/test_transactions.py::test_single_sale
+tests/test_transactions.py::test_batch_idempotent
+tests/test_transactions.py::test_return_transaction
+  D:\Files\Desktop\TyProject\Backend\tests\test_transactions.py:51: SAWarning: Can't sort tables for DROP; an unresolvable foreign key dependency exists between tables: stores, users; and backend does not support ALTER.  To restore at least a partial sort, apply use_alter=True to ForeignKey and ForeignKeyConstraint objects involved in the cycle to mark these as known cycles that will be ignored.
+    Base.metadata.drop_all(db.engine)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 3 passed, 4 warnings in 0.85s ========================
