@@ -1,0 +1,83 @@
+# ============================================================================
+# RetailIQ — Production Dockerfile (Multi-Stage)
+# Target: AWS ECS Fargate / any managed container platform
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Stage 1: Builder — compile wheels for all Python dependencies
+# ---------------------------------------------------------------------------
+FROM python:3.10-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    libffi-dev \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libgdk-pixbuf2.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt
+
+# ---------------------------------------------------------------------------
+# Stage 2: Runtime — lean production image
+# ---------------------------------------------------------------------------
+FROM python:3.10-slim-bookworm AS runtime
+
+# Labels for container registry metadata
+LABEL org.opencontainers.image.title="RetailIQ API" \
+      org.opencontainers.image.description="Flask + Gunicorn production API" \
+      org.opencontainers.image.vendor="RetailIQ"
+
+# Install only runtime system libraries (no compilers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi8 \
+    curl \
+    tini \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python tuning
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install pre-built wheels (no compilation needed)
+COPY --from=builder /build/wheels /tmp/wheels
+COPY requirements.txt .
+RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requirements.txt \
+    && rm -rf /tmp/wheels
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+# Copy application code
+COPY --chown=appuser:appuser . .
+
+# Make scripts executable
+RUN chmod +x scripts/entrypoint.sh scripts/start-app.sh
+
+EXPOSE 5000
+
+# Use tini as PID 1 for proper signal handling
+ENTRYPOINT ["tini", "--"]
+
+# Default: API service. Override CMD for worker/beat via SERVICE_ROLE env var.
+CMD ["scripts/entrypoint.sh"]
+
+# Health check for container orchestrators
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+USER appuser

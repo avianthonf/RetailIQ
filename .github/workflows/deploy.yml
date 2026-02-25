@@ -1,0 +1,162 @@
+# ============================================================================
+# RetailIQ — CI/CD Pipeline (GitHub Actions → AWS ECR + ECS Fargate)
+# ============================================================================
+# Triggers on push to main. Builds the production Docker image, pushes to ECR,
+# and updates ECS services (API, Worker, Beat).
+#
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_ACCOUNT_ID
+#   ECR_REPOSITORY, ECS_CLUSTER, ECS_API_SERVICE, ECS_WORKER_SERVICE,
+#   ECS_BEAT_SERVICE, ECS_API_TASK_DEF, ECS_WORKER_TASK_DEF, ECS_BEAT_TASK_DEF
+# ============================================================================
+
+name: Deploy to AWS ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Test
+  # --------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: retailiq
+          POSTGRES_PASSWORD: retailiq
+          POSTGRES_DB: retailiq_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U retailiq"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://retailiq:retailiq@localhost:5432/retailiq_test
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: test-secret-key-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  # --------------------------------------------------------------------------
+  # 2. Build & Push Docker Image
+  # --------------------------------------------------------------------------
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        run: |
+          FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build -f Dockerfile.prod -t "${FULL_IMAGE}" .
+          docker tag "${FULL_IMAGE}" "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker push "${FULL_IMAGE}"
+          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          echo "image=${FULL_IMAGE}" >> $GITHUB_OUTPUT
+
+  # --------------------------------------------------------------------------
+  # 3. Deploy to ECS (rolling update)
+  # --------------------------------------------------------------------------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - name: api
+            task_def_secret: ECS_API_TASK_DEF
+            service_secret: ECS_API_SERVICE
+          - name: worker
+            task_def_secret: ECS_WORKER_TASK_DEF
+            service_secret: ECS_WORKER_SERVICE
+          - name: beat
+            task_def_secret: ECS_BEAT_TASK_DEF
+            service_secret: ECS_BEAT_SERVICE
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ secrets[matrix.service.task_def_secret] }} \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: retailiq-${{ matrix.service.name }}
+          image: ${{ needs.build.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets[matrix.service.service_secret] }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10

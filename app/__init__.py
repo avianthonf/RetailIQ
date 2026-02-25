@@ -2,10 +2,14 @@ from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_cors import CORS
 from celery import Celery
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 import os
+import logging
+import redis as redis_lib
+from sqlalchemy import text
 
 db = SQLAlchemy()
 limiter = Limiter(key_func=get_remote_address)
@@ -34,6 +38,13 @@ def create_app(config=None):
     
     if config:
         app.config.update(config)
+
+    is_production = os.environ.get('FLASK_ENV', 'development') == 'production'
+    
+    # Secret key (required in production)
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', app.config.get('SECRET_KEY', 'dev-secret-key'))
+    if is_production and app.config['SECRET_KEY'] in ('dev-secret-key', 'yoursecretkey', ''):
+        raise RuntimeError('SECRET_KEY must be set to a strong random value in production')
     
     # Defaults — only applied when not already overridden by the caller
     if not app.config.get('SQLALCHEMY_DATABASE_URI'):
@@ -41,13 +52,33 @@ def create_app(config=None):
     if not app.config.get('CELERY_BROKER_URL'):
         app.config['CELERY_BROKER_URL'] = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/1')
 
-
+    # JWT RSA keys — mandatory in production, auto-generated only in dev/test
+    jwt_private = os.environ.get('JWT_PRIVATE_KEY', '')
+    jwt_public = os.environ.get('JWT_PUBLIC_KEY', '')
     if not app.config.get('JWT_PRIVATE_KEY'):
-        priv, pub = _generate_rsa_keys()
-        app.config['JWT_PRIVATE_KEY'] = priv
-        app.config['JWT_PUBLIC_KEY'] = pub
+        if jwt_private and jwt_public:
+            app.config['JWT_PRIVATE_KEY'] = jwt_private.replace('\\n', '\n')
+            app.config['JWT_PUBLIC_KEY'] = jwt_public.replace('\\n', '\n')
+        elif is_production:
+            raise RuntimeError('JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be set in production')
+        else:
+            priv, pub = _generate_rsa_keys()
+            app.config['JWT_PRIVATE_KEY'] = priv
+            app.config['JWT_PUBLIC_KEY'] = pub
         
     app.config['RATELIMIT_STORAGE_URI'] = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+
+    # Disable debug in production
+    if is_production:
+        app.config['DEBUG'] = False
+        app.config['TESTING'] = False
+
+    # CORS
+    cors_origins = os.environ.get('CORS_ORIGINS', '')
+    if cors_origins:
+        CORS(app, origins=cors_origins.split(','), supports_credentials=True)
+    elif not is_production:
+        CORS(app)  # permissive in development only
 
     db.init_app(app)
     limiter.init_app(app)
@@ -89,12 +120,46 @@ def create_app(config=None):
     app.register_blueprint(nlp_bp, url_prefix='/api/v1/query')
     app.register_blueprint(models_bp, url_prefix='/api/v1/models')
 
+    def _check_health():
+        """Run actual DB and Redis connectivity checks."""
+        health = {'status': 'ok', 'db': 'unknown', 'redis': 'unknown'}
+        http_status = 200
+
+        # Check PostgreSQL
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text('SELECT 1'))
+            health['db'] = 'ok'
+        except Exception as exc:
+            health['db'] = 'error'
+            health['db_error'] = str(exc)
+            health['status'] = 'degraded'
+            http_status = 503
+            app.logger.error('Health check: DB unreachable: %s', exc)
+
+        # Check Redis
+        try:
+            redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+            r = redis_lib.Redis.from_url(redis_url, socket_timeout=3)
+            r.ping()
+            health['redis'] = 'ok'
+        except Exception as exc:
+            health['redis'] = 'error'
+            health['redis_error'] = str(exc)
+            health['status'] = 'degraded'
+            http_status = 503
+            app.logger.error('Health check: Redis unreachable: %s', exc)
+
+        return jsonify(health), http_status
+
+    # ALB / container orchestrator health probe (short path)
+    @app.route('/health')
+    def health_root():
+        return _check_health()
+
+    # API-namespaced health endpoint (backward compat)
     @app.route('/api/v1/health')
-    def health():
-        return jsonify({
-            'status': 'ok',
-            'db': 'ok',
-            'redis': 'ok'
-        })
-        
+    def health_api():
+        return _check_health()
+
     return app

@@ -1,0 +1,5 @@
+# Dev/test dependencies — NOT installed in the production image.
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+pytest==8.1.1
+pytest-flask==1.3.0

@@ -1,0 +1,64 @@
+# ============================================================================
+# RetailIQ — Production Docker Compose (Local Simulation)
+# ============================================================================
+# This file is for LOCAL TESTING of the production image. In actual production,
+# services run on AWS ECS Fargate with managed RDS + ElastiCache.
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up --build
+# ============================================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    ports:
+      - "5000:5000"
+    environment:
+      - SERVICE_ROLE=api
+      - FLASK_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - GUNICORN_MAX_WORKERS=${GUNICORN_MAX_WORKERS:-4}
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    environment:
+      - SERVICE_ROLE=worker
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - CELERY_CONCURRENCY=${CELERY_CONCURRENCY:-4}
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    environment:
+      - SERVICE_ROLE=beat
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SECRET_KEY=${SECRET_KEY}
+    restart: unless-stopped
+    deploy:
+      replicas: 1 # MUST be exactly 1 — singleton scheduler
