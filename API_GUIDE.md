@@ -32,7 +32,8 @@ All endpoints return a consistent JSON envelope:
   "success": true,
   "data": { ... },
   "error": null,
-  "meta": { ... }
+  "meta": { ... },
+  "timestamp": "2026-02-25T10:30:00+00:00"
 }
 ```
 
@@ -45,7 +46,9 @@ On error:
   "error": {
     "code": "ERROR_CODE",
     "message": "Human-readable description"
-  }
+  },
+  "meta": null,
+  "timestamp": "2026-02-25T10:30:00+00:00"
 }
 ```
 
@@ -992,36 +995,65 @@ All analytics endpoints read from pre-computed aggregation tables. They support 
   "success": true,
   "data": {
     "today_kpis": {
+      "date": "2026-02-25",
       "revenue": 15800.00,
       "profit": 4200.00,
-      "transaction_count": 45,
+      "transactions": 45,
       "avg_basket": 351.11,
       "units_sold": 230
     },
     "revenue_7d": [
-      { "date": "2026-02-19", "revenue": 12000.00 },
-      { "date": "2026-02-20", "revenue": 14500.00 }
+      {
+        "date": "2026-02-19",
+        "revenue": 12000.00,
+        "profit": 3200.00,
+        "transactions": 38,
+        "avg_basket": 315.79,
+        "units_sold": 190,
+        "moving_avg_7d": 11800.00
+      },
+      {
+        "date": "2026-02-20",
+        "revenue": 14500.00,
+        "profit": 3900.00,
+        "transactions": 42,
+        "avg_basket": 345.24,
+        "units_sold": 210,
+        "moving_avg_7d": 12500.00
+      }
     ],
-    "moving_avg_7d": 13500.00,
+    "moving_avg_7d": [
+      { "date": "2026-02-19", "moving_avg": 11800.00 },
+      { "date": "2026-02-20", "moving_avg": 12500.00 }
+    ],
     "alerts_summary": {
-      "critical": 2,
-      "high": 1,
-      "low": 5,
-      "info": 3
+      "CRITICAL": 2,
+      "HIGH": 1,
+      "LOW": 5,
+      "INFO": 3,
+      "total": 11
     },
     "top_products_today": [
-      { "product_id": 1, "name": "Coca-Cola", "revenue": 1200.00, "units": 30 }
+      { "product_id": 1, "name": "Coca-Cola", "revenue": 1200.00, "units_sold": 30 }
     ],
     "insights": [
       {
-        "type": "trend",
-        "headline": "Revenue Above Average",
-        "detail": "Today's revenue is 17% above the 7-day moving average."
+        "type": "positive",
+        "title": "Revenue above trend",
+        "body": "Today's revenue (15800) is 17.0% above the 7-day average."
       }
     ]
   }
 }
 ```
+
+> **Notes on dashboard fields**:
+> - `today_kpis.transactions` — field name is `transactions`, NOT `transaction_count`
+> - `moving_avg_7d` — this is a **list of objects** `[{ date, moving_avg }]`, NOT a scalar
+> - `revenue_7d` entries include all KPI fields plus `moving_avg_7d` per day
+> - `alerts_summary` keys are **UPPERCASE** (`CRITICAL`, `HIGH`, `LOW`, `INFO`) plus a `total` count
+> - `top_products_today` uses `units_sold`, NOT `units`
+> - `insights` use `title`/`body`, NOT `headline`/`detail`. Types: `positive`, `warning`, `alert`, `info`
 
 ---
 
@@ -1031,7 +1063,9 @@ All analytics endpoints read from pre-computed aggregation tables. They support 
 
 Daily revenue time series.
 
-**Response**: `{ data: [{ date, revenue, transaction_count, avg_basket }] }`
+**Additional Query Parameters**: `group_by` (string, `day`|`week`|`month`, default `day`)
+
+**Response**: `{ data: [{ date, revenue, profit, transactions, moving_avg_7d }] }`
 
 ---
 
@@ -1041,7 +1075,9 @@ Daily revenue time series.
 
 Daily profit time series with margin breakdown.
 
-**Response**: `{ data: [{ date, revenue, cost, profit, margin_pct }] }`
+**Additional Query Parameters**: `group_by` (string, `day`|`week`|`month`, default `day`)
+
+**Response**: `{ data: [{ date, profit, revenue, margin_pct, moving_avg_7d }] }`
 
 ---
 
@@ -1051,9 +1087,14 @@ Daily profit time series with margin breakdown.
 
 Top products by revenue.
 
-**Query Parameters**: `limit` (default 10)
+**Additional Query Parameters**:
 
-**Response**: `{ data: [{ product_id, name, revenue, units_sold, profit }] }`
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `metric` | string | `revenue` | `revenue`, `quantity`, or `profit` |
+| `limit` | int | 10 | Max 100 |
+
+**Response**: `{ data: [{ rank, product_id, name, revenue, quantity, profit }] }`
 
 ---
 
@@ -1063,7 +1104,7 @@ Top products by revenue.
 
 Revenue and units by category.
 
-**Response**: `{ data: [{ category_id, name, revenue, units_sold, profit }] }`
+**Response**: `{ data: [{ category_id, name, revenue, profit, units, share_pct }] }`
 
 ---
 
@@ -1092,7 +1133,7 @@ Revenue breakdown by payment mode (CASH, UPI, CARD, CREDIT).
 
 ---
 
-### GET `/analytics/customers-summary`
+### GET `/analytics/customers/summary`
 
 🔒 **Auth required**
 
