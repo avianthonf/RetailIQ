@@ -18,7 +18,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-    command: ./scripts/start-app.sh
+    command:
+      - sh
+      - -c
+      - python scripts/wait_for_db.py && alembic upgrade head && exec gunicorn --bind 0.0.0.0:5000 wsgi:app
 
   postgres:
     image: postgres:15
