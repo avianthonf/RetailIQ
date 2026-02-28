@@ -17,15 +17,30 @@ def create_transaction():
         data = TransactionCreateSchema().load(request.json)
     except ValidationError as err:
         return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
-        
+
     store_id = g.current_user['store_id']
-    
+    user_id = g.current_user['user_id']
+    role = g.current_user['role']
+
+    session_id = None
+    if role == 'staff':
+        from ..models import StaffSession
+        open_session = db.session.query(StaffSession).filter(
+            StaffSession.store_id == store_id,
+            StaffSession.user_id == user_id,
+            StaffSession.status == 'OPEN'
+        ).first()
+        if open_session:
+            session_id = open_session.id
+
     try:
-        txn = process_single_transaction(data, store_id)
+        txn = process_single_transaction(data, store_id, session_id=session_id)
         db.session.commit()
         return format_response(True, data={"transaction_id": str(txn.transaction_id)}), 201
     except ValueError as e:
         db.session.rollback()
+        if "Credit limit" in str(e):
+            return format_response(False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)}), 422
         return format_response(False, error={"code": "BAD_REQUEST", "message": str(e)}), 400
     except Exception as e:
         db.session.rollback()
@@ -38,10 +53,23 @@ def create_batch_transactions():
         data = BatchTransactionCreateSchema().load(request.json)
     except ValidationError as err:
         return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
-        
+
     store_id = g.current_user['store_id']
+    user_id = g.current_user['user_id']
+    role = g.current_user['role']
+
+    session_id = None
+    if role == 'staff':
+        from ..models import StaffSession
+        open_session = db.session.query(StaffSession).filter(
+            StaffSession.store_id == store_id,
+            StaffSession.user_id == user_id,
+            StaffSession.status == 'OPEN'
+        ).first()
+        if open_session:
+            session_id = open_session.id
     
-    result = process_batch_transactions(data['transactions'], store_id)
+    result = process_batch_transactions(data['transactions'], store_id, session_id=session_id)
     db.session.commit()
     return format_response(True, data=result), 200
 

@@ -23,6 +23,7 @@ from app.auth.utils import format_response
 from .helpers import (
     cache_response, parse_date, aggregate_by_period,
     compute_7d_moving_avg, bucket_date,
+    build_7d_revenue_series, zero_fill_date_range,
 )
 
 analytics_bp = Blueprint('analytics', __name__)
@@ -565,8 +566,10 @@ def dashboard():
         if row_date == today:
             today_kpis = {**entry}
 
+    revenue_7d = zero_fill_date_range(revenue_7d, week_ago, today, ['revenue', 'profit', 'transactions', 'avg_basket', 'units_sold'])
     revenue_7d = compute_7d_moving_avg(revenue_7d, value_key='revenue')
     moving_avg_7d = [{'date': r['date'], 'moving_avg': r.get('moving_avg_7d', 0)} for r in revenue_7d]
+    final_revenue_7d = build_7d_revenue_series(revenue_7d, today)
 
     if not today_kpis:
         today_kpis = {
@@ -601,15 +604,55 @@ def dashboard():
         for r in top_rows
     ]
 
+    # ── Q4: Category breakdown (7-day) ────────────────────────────────────────
+    cat_rows = db.session.execute(text("""
+        SELECT c.name, SUM(dcs.revenue) AS revenue
+        FROM daily_category_summary dcs
+        LEFT JOIN categories c ON c.category_id = dcs.category_id
+        WHERE dcs.store_id = :sid AND dcs.date >= :week_ago AND dcs.date <= :today
+        GROUP BY c.name
+        ORDER BY revenue DESC
+    """), {'sid': sid, 'week_ago': str(week_ago), 'today': str(today)}).fetchall()
+
+    total_cat_rev = sum(float(r.revenue or 0) for r in cat_rows)
+    category_breakdown = [
+        {
+            'category_name': r.name or 'Uncategorised',
+            'revenue': float(r.revenue or 0),
+            'percentage': round(float(r.revenue or 0) / total_cat_rev * 100, 2) if total_cat_rev else 0.0
+        } for r in cat_rows
+    ]
+
+    # ── Q5: Payment mode breakdown (7-day) ────────────────────────────────────
+    pm_rows = db.session.execute(text("""
+        SELECT payment_mode, COUNT(*) as cnt,
+               SUM((SELECT COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0)
+                    FROM transaction_items ti WHERE ti.transaction_id = t.transaction_id)) AS revenue
+        FROM transactions t
+        WHERE t.store_id = :sid AND DATE(t.created_at) >= :week_ago AND DATE(t.created_at) <= :today AND t.is_return = FALSE
+        GROUP BY t.payment_mode
+        ORDER BY revenue DESC
+    """), {'sid': sid, 'week_ago': str(week_ago), 'today': str(today)}).fetchall()
+
+    payment_mode_breakdown = [
+        {
+            'mode': r.payment_mode or 'UNKNOWN',
+            'count': r.cnt,
+            'amount': float(r.revenue or 0)
+        } for r in pm_rows
+    ]
+
     # ── NLP stub insights (no DB query) ──────────────────────────────────────
     insights = _generate_insight_stubs(today_kpis, revenue_7d, alerts_summary)
 
     return jsonify(format_response(data={
         'today_kpis':        today_kpis,
-        'revenue_7d':        revenue_7d,
+        'revenue_7d':        final_revenue_7d,
         'moving_avg_7d':     moving_avg_7d,
         'alerts_summary':    alerts_summary,
         'top_products_today': top_products_today,
+        'category_breakdown': category_breakdown,
+        'payment_mode_breakdown': payment_mode_breakdown,
         'insights':          insights,
     }))
 

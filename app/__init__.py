@@ -105,6 +105,14 @@ def create_app(config=None):
     from app.decisions import decisions_bp
     from app.nlp import nlp_bp
     from .models import models_bp
+    from .receipts import receipts_bp
+    from .suppliers.routes import suppliers_bp
+    from .staff_performance import staff_performance_bp
+    from .offline import offline_bp
+    from .loyalty import loyalty_bp
+    from .gst import gst_bp
+    from .whatsapp import whatsapp_bp
+    from .chain import chain_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(team_bp, url_prefix='/api/v1/team')
@@ -119,6 +127,14 @@ def create_app(config=None):
     app.register_blueprint(decisions_bp, url_prefix='/api/v1/recommendations')
     app.register_blueprint(nlp_bp, url_prefix='/api/v1/query')
     app.register_blueprint(models_bp, url_prefix='/api/v1/models')
+    app.register_blueprint(receipts_bp, url_prefix='/api/v1')
+    app.register_blueprint(suppliers_bp, url_prefix='/api/v1')
+    app.register_blueprint(staff_performance_bp, url_prefix='/api/v1/staff')
+    app.register_blueprint(offline_bp, url_prefix='/api/v1/offline')
+    app.register_blueprint(loyalty_bp, url_prefix='/api/v1')
+    app.register_blueprint(gst_bp, url_prefix='/api/v1')
+    app.register_blueprint(whatsapp_bp, url_prefix='/api/v1')
+    app.register_blueprint(chain_bp, url_prefix='/api/v1/chain')
 
     def _check_health():
         """Run actual DB and Redis connectivity checks."""

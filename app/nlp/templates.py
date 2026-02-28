@@ -28,10 +28,30 @@ TEMPLATES = {
         "detail_template": "Leading SKUs by revenue (last 30 days): {value}.",
         "action": "Consider increasing stock levels for top revenue contributors."
     },
+    "loyalty_summary": {
+        "headline": "Loyalty Program Summary",
+        "detail_template": "You have {enrolled} enrolled customers. {issued} points issued and {redeemed} points redeemed this month.",
+        "action": "Promote loyalty program at checkout."
+    },
+    "credit_overdue": {
+        "headline": "Overdue Credit",
+        "detail_template": "There are {count} customers with overdue credit exceeding 30 days. Total outstanding: {total_overdue}.",
+        "action": "Send reminders to overdue customers."
+    },
     "default": {
         "headline": "Retail Intelligence",
         "detail_template": "Analyzing historical data bounds. Current observed value: {value}.",
         "action": "No specific anomalies detected."
+    },
+    "supplier_reliability": {
+        "headline": "Supplier Reliability",
+        "detail_template": "Your most reliable supplier is {name} with a {fill_rate}% fill rate and {lead_time} day average lead time.",
+        "action": "Maintain relationship."
+    },
+    "overdue_po": {
+        "headline": "Overdue Orders",
+        "detail_template": "You have {n} overdue purchase orders. Oldest is {days} days late from {supplier_name}.",
+        "action": "Follow up with suppliers."
     }
 }
 

@@ -69,7 +69,15 @@ def verify_otp_endpoint():
         if user:
             user.is_active = True
             db.session.commit()
-            return format_response(True, data={"message": "Account verified successfully."}), 200
+            access_token = generate_access_token(user.user_id, user.store_id, user.role)
+            refresh_token = generate_refresh_token(user.user_id)
+            return format_response(True, data={
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "user_id": user.user_id,
+                "role": user.role,
+                "store_id": user.store_id
+            }), 200
         return format_response(False, error={"code": "USER_NOT_FOUND", "message": "User not found."}), 404
         
     return format_response(False, error={"code": "INVALID_OTP", "message": "Invalid or expired OTP."}), 400

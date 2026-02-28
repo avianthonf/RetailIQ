@@ -20,11 +20,22 @@ def get_decisions():
     actions = evaluate_rules(contexts)
     duration_ms = (time.time() - start) * 1000
     
+    # Check if WhatsApp is active
+    from app.models import WhatsAppConfig
+    wa_config = db.session.query(WhatsAppConfig).filter_by(store_id=store_id, is_active=True).first()
+    wa_enabled = wa_config is not None and bool(wa_config.access_token_encrypted)
+
+    # 3. Add contextual WhatsApp option
+    if wa_enabled:
+        for action in actions:
+             action["available_actions"] = ["Acknowledge", "Send via WhatsApp"]
+    
     return jsonify({
         "status": "success",
         "data": actions,
         "meta": {
             "execution_time_ms": round(duration_ms, 2),
-            "total_recommendations": len(actions)
+            "total_recommendations": len(actions),
+            "whatsapp_enabled": wa_enabled
         }
     }), 200

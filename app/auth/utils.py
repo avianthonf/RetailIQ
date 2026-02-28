@@ -24,6 +24,9 @@ def get_redis_client():
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 def generate_access_token(user_id, store_id, role):
+    from app import db
+    from app.models import StoreGroup
+    
     private_key = current_app.config['JWT_PRIVATE_KEY']
     now = datetime.now(timezone.utc)
     payload = {
@@ -33,6 +36,13 @@ def generate_access_token(user_id, store_id, role):
         'iat': now.timestamp(),
         'exp': (now + timedelta(hours=2)).timestamp()
     }
+
+    # Inject Chain claims
+    store_group = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
+    if store_group:
+        payload['chain_group_id'] = str(store_group.id)
+        payload['chain_role'] = 'CHAIN_OWNER'
+
     return jwt.encode(payload, private_key, algorithm='RS256')
 
 def generate_refresh_token(user_id):

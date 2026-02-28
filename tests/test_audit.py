@@ -96,4 +96,4 @@ def test_phase_2_prophet_vs_fallback(app, test_store, test_product):
             forecast_store(test_store.store_id)
             
         rows = _db.session.query(ForecastCache).filter_by(store_id=test_store.store_id).all()
-        assert rows[0].model_type in ('linear_regression', 'prophet')
+        assert rows[0].model_type in ('ridge', 'prophet')

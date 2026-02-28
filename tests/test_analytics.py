@@ -407,3 +407,66 @@ class TestDashboardEndpoint:
         kpis = resp.get_json()['data']['today_kpis']
         assert kpis['revenue'] == pytest.approx(5000.0, abs=0.01)
         assert kpis['transactions'] == 42
+
+
+    def test_revenue_7d_always_7_elements(self, client, owner_headers, test_store):
+        """Seed 3 days of transactions, call dashboard, assert len(revenue_7d) == 7."""
+        start = date.today() - timedelta(days=2)
+        _seed_store_summary(test_store.store_id, start, 3, base_rev=100.0)
+
+        resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
+        data = resp.get_json()['data']
+        assert len(data['revenue_7d']) == 7
+
+    def test_revenue_7d_zero_fill(self, client, owner_headers, test_store):
+        """Assert missing days have revenue == 0.0."""
+        # Seed only today and 3 days ago.
+        today = date.today()
+        _db.session.add(DailyStoreSummary(
+            date=today, store_id=test_store.store_id, revenue=100.0, profit=20.0, transaction_count=5
+        ))
+        _db.session.add(DailyStoreSummary(
+            date=today - timedelta(days=3), store_id=test_store.store_id, revenue=200.0, profit=40.0, transaction_count=10
+        ))
+        _db.session.commit()
+
+        resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
+        data = resp.get_json()['data']
+        rev_7d = data['revenue_7d']
+        assert len(rev_7d) == 7
+        
+        # Day -3 should have 200, Day 0 should have 100, others 0
+        missing_days = [r for r in rev_7d if r['date'] not in (str(today), str(today - timedelta(days=3)))]
+        assert len(missing_days) == 5
+        for d in missing_days:
+            assert d['revenue'] == 0.0
+
+    def test_category_breakdown_sorted_descending(self, client, owner_headers, test_store, test_category):
+        from app.models import Category
+        cat2 = Category(store_id=test_store.store_id, name='Small Category')
+        _db.session.add(cat2)
+        _db.session.commit()
+
+        # Seed categories with different revenues
+        _seed_category_summary(test_store.store_id, test_category.category_id, date.today(), 1, base_rev=1000.0)
+        _seed_category_summary(test_store.store_id, cat2.category_id, date.today(), 1, base_rev=200.0)
+
+        resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
+        data = resp.get_json()['data']
+        
+        assert 'category_breakdown' in data
+        cats = data['category_breakdown']
+        assert len(cats) >= 2
+        
+        # Verify sorted descending
+        revenues = [c['revenue'] for c in cats]
+        assert revenues == sorted(revenues, reverse=True)
+        assert 'percentage' in cats[0]
+
+    def test_payment_mode_breakdown_present(self, client, owner_headers, test_store):
+        """Ensure the response includes payment_mode_breakdown."""
+        resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
+        data = resp.get_json()['data']
+        
+        assert 'payment_mode_breakdown' in data
+        assert isinstance(data['payment_mode_breakdown'], list)

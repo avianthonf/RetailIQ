@@ -8,7 +8,9 @@ INTENT_PATTERNS = [
     ("inventory", r"(?i)(stock|inventory|reorder|empty|replenish|available)"),
     ("revenue", r"(?i)(revenue|sales|income|money)"),
     ("profit", r"(?i)(profit|margin|cost)"),
-    ("top_products", r"(?i)(top|best|pareto|80/20)")
+    ("top_products", r"(?i)(top|best|pareto|80/20)"),
+    ("loyalty_summary", r"(?i)(loyalty|points|redeem|rewards|earn)"),
+    ("credit_overdue", r"(?i)(credit|overdue|repayment|debt|ledger)")
 ]
 
 def resolve_intent(query: str) -> str:

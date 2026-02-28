@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone, date as date_type
+from decimal import Decimal
 
 import redis as redis_lib
 from celery import shared_task
@@ -14,6 +15,7 @@ from celery.utils.log import get_task_logger
 from sqlalchemy import text
 
 from .db_session import task_session
+from app.models import AnalyticsSnapshot
 
 logger = get_task_logger(__name__)
 
@@ -573,3 +575,555 @@ def send_weekly_digest(self):
                 """), {"sid": s.store_id, "start": str(week_start), "today": str(today)}).fetchall()
 
                 _log('send_weekly_digest', store_id=s.store_id, weekly_revenue=float(rev_row.revenue))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. check_overdue_purchase_orders
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, name='tasks.check_overdue_purchase_orders', max_retries=3, default_retry_delay=120, autoretry_for=(Exception,), retry_backoff=True)
+def check_overdue_purchase_orders(self):
+    lock_key = f"lock:overdue_po:{date_type.today()}"
+    with _RedisLock(lock_key, ttl=3600) as acquired:
+        if not acquired: return
+        
+        today = date_type.today()
+        
+        with task_session() as session:
+            overdue_pos = session.execute(text("""
+                SELECT po.id, po.store_id, po.expected_delivery_date, s.name as supplier_name
+                FROM purchase_orders po
+                JOIN suppliers s ON po.supplier_id = s.id
+                WHERE po.status = 'SENT'
+                  AND po.expected_delivery_date < :today
+            """), {"today": str(today)}).fetchall()
+            
+            for row in overdue_pos:
+                n_days = (today - _coerce_to_date(row.expected_delivery_date)).days
+                msg = f"PO #{row.id} from {row.supplier_name} is overdue by {n_days} days."
+                _upsert_alert(session, row.store_id, 'OVERDUE_PO', 'MEDIUM', None, msg, today)
+                
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. auto_close_open_sessions (Staff Performance)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, name='tasks.auto_close_open_sessions', max_retries=3, default_retry_delay=120, autoretry_for=(Exception,), retry_backoff=True)
+def auto_close_open_sessions(self):
+    """Daily job. Closes all OPEN staff sessions older than 16 hours."""
+    lock_key = f"lock:auto_close_sessions:{date_type.today()}"
+    with _RedisLock(lock_key, ttl=3600) as acquired:
+        if not acquired: return
+        
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=16)
+        
+        with task_session() as session:
+            # We use ORM syntax or raw SQL, let's use raw SQL for consistency here
+            session.execute(text("""
+                UPDATE staff_sessions
+                SET status = 'CLOSED', ended_at = CURRENT_TIMESTAMP
+                WHERE status = 'OPEN' AND started_at < :cutoff
+            """), {"cutoff": str(cutoff_time)})
+            
+            _log('auto_close_open_sessions', cutoff=cutoff_time.isoformat())
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 8. generate_staff_daily_summary
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, name='tasks.generate_staff_daily_summary', max_retries=3, default_retry_delay=120, autoretry_for=(Exception,), retry_backoff=True)
+def generate_staff_daily_summary(self):
+    """Daily. Computes yesterday's actual vs target for each staff, stores in Redis cache."""
+    yesterday = date_type.today() - timedelta(days=1)
+    lock_key = f"lock:generate_staff_summary:{yesterday}"
+    
+    with _RedisLock(lock_key, ttl=3600) as acquired:
+        if not acquired: return
+        
+        with task_session() as session:
+            # Get all targets for yesterday
+            targets = session.execute(text("""
+                SELECT t.store_id, t.user_id, t.revenue_target, t.transaction_count_target, u.full_name, u.mobile_number
+                FROM staff_daily_targets t
+                JOIN users u ON t.user_id = u.user_id
+                WHERE t.target_date = :yesterday
+            """), {"yesterday": str(yesterday)}).fetchall()
+            
+            r = _redis_client()
+            
+            for row in targets:
+                # Calculate actuals from yesterday logic
+                # Transactions done by user OR in session owned by user
+                actuals = session.execute(text("""
+                    SELECT 
+                        COUNT(DISTINCT t.transaction_id) as txn_count,
+                        COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0) as revenue
+                    FROM transactions t
+                    JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
+                    LEFT JOIN staff_sessions ss ON t.session_id = ss.id
+                    WHERE t.store_id = :store_id 
+                      AND t.is_return = FALSE
+                      AND DATE(t.created_at) = :yesterday
+                      AND ss.user_id = :user_id
+                """), {
+                    "store_id": row.store_id,
+                    "yesterday": str(yesterday),
+                    "user_id": row.user_id
+                }).fetchone()
+                
+                summary = {
+                    "user_id": row.user_id,
+                    "name": row.full_name or row.mobile_number,
+                    "target_date": str(yesterday),
+                    "target_revenue": float(row.revenue_target) if row.revenue_target else None,
+                    "target_txns": row.transaction_count_target,
+                    "actual_revenue": float(actuals.revenue) if actuals else 0.0,
+                    "actual_txns": int(actuals.txn_count) if actuals else 0
+                }
+                
+                cache_key = f"staff_summary:{row.store_id}:{yesterday}"
+                r.hset(cache_key, str(row.user_id), json.dumps(summary))
+                # Expire in 30 days
+                r.expire(cache_key, 86400 * 30)
+                
+            _log('generate_staff_daily_summary', summary_date=str(yesterday), count=len(targets))
+
+@shared_task(name="tasks.build_analytics_snapshot", bind=True, max_retries=3)
+def build_analytics_snapshot(self, store_id):
+    """
+    Builds the compact 50KB offline JSON payload for a store and upserts it.
+    """
+    logger.info(f"Building analytics snapshot for store_id={store_id}")
+    with task_session() as db:
+        from app.offline.builder import build_snapshot
+        
+        try:
+            snapshot_data = build_snapshot(store_id, db)
+            serialized_len = len(json.dumps(snapshot_data).encode('utf-8'))
+            
+            # Upsert
+            existing = db.query(AnalyticsSnapshot).filter_by(store_id=store_id).first()
+            if existing:
+                existing.snapshot_data = snapshot_data
+                existing.built_at = datetime.fromisoformat(snapshot_data["built_at"])
+                existing.size_bytes = serialized_len
+            else:
+                new_snap = AnalyticsSnapshot(
+                    store_id=store_id,
+                    snapshot_data=snapshot_data,
+                    built_at=datetime.fromisoformat(snapshot_data["built_at"]),
+                    size_bytes=serialized_len
+                )
+                db.add(new_snap)
+                
+            db.commit()
+            _log('build_analytics_snapshot', store_id=store_id, size=serialized_len)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to build analytics snapshot for store {store_id}: {e}")
+            raise self.retry(exc=e, countdown=60)
+
+@shared_task(name="tasks.build_all_analytics_snapshots")
+def build_all_analytics_snapshots():
+    """Triggers snapshot generation for all active stores."""
+    logger.info("Starting batch analytics snapshots generation")
+    with task_session() as db:
+        stores = db.session.query(Store).filter(Store.is_active == True).all()
+        for store in stores:
+            build_analytics_snapshot.delay(store.store_id)
+            
+    _log('build_all_analytics_snapshots', count=len(stores))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 11. expire_loyalty_points
+# ──────────────────────────────────────────────────────────────────────────────
+@shared_task(name="tasks.expire_loyalty_points", bind=True, max_retries=3)
+def expire_loyalty_points(self):
+    """Monthly task on the 1st: expire points older than expiry_days due to inactivity."""
+    from app.models import LoyaltyProgram, CustomerLoyaltyAccount, LoyaltyTransaction
+    from decimal import Decimal
+    with task_session() as session:
+        programs = session.query(LoyaltyProgram).filter_by(is_active=True).all()
+        for prog in programs:
+            expiry_date = datetime.utcnow() - timedelta(days=prog.expiry_days)
+            # Fetch accounts and evaluate conditions in python to bypass SQLite string/Numeric typing mismatches
+            accounts = session.query(CustomerLoyaltyAccount).filter_by(store_id=prog.store_id).all()
+
+            for acc in accounts:
+                if acc.redeemable_points is None or acc.redeemable_points <= 0:
+                    continue
+                if acc.last_activity_at is None or acc.last_activity_at >= expiry_date:
+                    continue
+                
+                expired_points = Decimal(str(acc.redeemable_points))
+                acc.total_points = Decimal(str(acc.total_points)) - expired_points
+                acc.redeemable_points = 0
+                acc.last_activity_at = datetime.utcnow()
+                
+                ltxn = LoyaltyTransaction(
+                    account_id=acc.id,
+                    type='EXPIRE',
+                    points=-expired_points,
+                    balance_after=acc.total_points,
+                    notes=f"Points expired after {prog.expiry_days} days of inactivity"
+                )
+                session.add(ltxn)
+
+        _log('expire_loyalty_points', processed_programs=len(programs))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 12. credit_overdue_alerts
+# ──────────────────────────────────────────────────────────────────────────────
+@shared_task(name="tasks.credit_overdue_alerts", bind=True, max_retries=3)
+def credit_overdue_alerts(self):
+    """Daily task: create HIGH-priority alerts for customers with credit > 0 and no repayment in 30 days."""
+    from app.models import CreditLedger, Customer
+    with task_session() as session:
+        overdue_date = datetime.utcnow() - timedelta(days=30)
+        ledgers = session.query(CreditLedger).filter(
+            CreditLedger.balance > 0,
+            CreditLedger.updated_at < overdue_date
+        ).all()
+
+        date_bucket = datetime.utcnow().strftime("%Y-%m-%d")
+        for ledger in ledgers:
+            customer = session.query(Customer).filter_by(customer_id=ledger.customer_id).first()
+            if customer:
+                _upsert_alert(
+                    session,
+                    store_id=ledger.store_id,
+                    alert_type="credit_overdue",
+                    priority="HIGH",
+                    product_id=None,
+                    message=f"Customer {customer.name} has overdue credit balance of ₹{ledger.balance} (No repayment in 30 days).",
+                    date_bucket=date_bucket
+                )
+
+        _log('credit_overdue_alerts', alerts_created=len(ledgers))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 13. compile_monthly_gst
+# ──────────────────────────────────────────────────────────────────────────────
+@shared_task(name="tasks.compile_monthly_gst", bind=True, max_retries=3)
+def compile_monthly_gst(self, store_id, period):
+    """Monthly task: aggregate gst_transactions into a gst_filing_period and generate GSTR-1 JSON."""
+    import json, os
+    from app.models import GSTTransaction, GSTFilingPeriod, StoreGSTConfig, Store
+
+    with task_session() as session:
+        gst_txns = session.query(GSTTransaction).filter_by(store_id=store_id, period=period).all()
+
+        total_taxable = Decimal('0')
+        total_cgst = Decimal('0')
+        total_sgst = Decimal('0')
+        total_igst = Decimal('0')
+        hsn_agg = {}
+
+        for gt in gst_txns:
+            total_taxable += Decimal(str(gt.taxable_amount or 0))
+            total_cgst += Decimal(str(gt.cgst_amount or 0))
+            total_sgst += Decimal(str(gt.sgst_amount or 0))
+            total_igst += Decimal(str(gt.igst_amount or 0))
+            if gt.hsn_breakdown:
+                for hsn, detail in gt.hsn_breakdown.items():
+                    if hsn not in hsn_agg:
+                        hsn_agg[hsn] = {'taxable': 0, 'cgst': 0, 'sgst': 0, 'igst': 0, 'rate': detail.get('rate', 0)}
+                    hsn_agg[hsn]['taxable'] += detail.get('taxable', 0)
+                    hsn_agg[hsn]['cgst'] += detail.get('cgst', 0)
+                    hsn_agg[hsn]['sgst'] += detail.get('sgst', 0)
+                    hsn_agg[hsn]['igst'] += detail.get('igst', 0)
+
+        # Upsert filing period
+        filing = session.query(GSTFilingPeriod).filter_by(store_id=store_id, period=period).first()
+        if not filing:
+            filing = GSTFilingPeriod(store_id=store_id, period=period)
+            session.add(filing)
+            session.flush()
+
+        filing.total_taxable = round(total_taxable, 2)
+        filing.total_cgst = round(total_cgst, 2)
+        filing.total_sgst = round(total_sgst, 2)
+        filing.total_igst = round(total_igst, 2)
+        filing.invoice_count = len(gst_txns)
+        filing.compiled_at = datetime.utcnow()
+        filing.status = 'COMPILED'
+
+        # Build GSTR-1 JSON structure
+        config = session.query(StoreGSTConfig).filter_by(store_id=store_id).first()
+        store = session.query(Store).filter_by(store_id=store_id).first()
+
+        gstr1 = {
+            'gstin': config.gstin if config else None,
+            'fp': period.replace('-', ''),  # GSTR-1 uses MMYYYY format
+            'store_name': store.store_name if store else None,
+            'b2b': [],  # B2B invoices (placeholder)
+            'b2cs': [],  # B2C small invoices
+            'hsn': {
+                'data': [
+                    {
+                        'hsn_sc': hsn,
+                        'txval': round(d['taxable'], 2),
+                        'camt': round(d['cgst'], 2),
+                        'samt': round(d['sgst'], 2),
+                        'iamt': round(d['igst'], 2),
+                        'rt': d['rate']
+                    }
+                    for hsn, d in hsn_agg.items()
+                ]
+            },
+            'doc_issue': {'doc_det': [{'num': len(gst_txns), 'from': '1', 'to': str(len(gst_txns))}]},
+            'total_taxable': float(round(total_taxable, 2)),
+            'total_cgst': float(round(total_cgst, 2)),
+            'total_sgst': float(round(total_sgst, 2)),
+            'total_igst': float(round(total_igst, 2)),
+        }
+
+        # Write JSON to filesystem
+        gstr1_dir = os.environ.get('GSTR1_OUTPUT_DIR', '/tmp/gstr1')
+        os.makedirs(gstr1_dir, exist_ok=True)
+        json_path = os.path.join(gstr1_dir, f'{store_id}_{period}.json')
+        with open(json_path, 'w') as f:
+            json.dump(gstr1, f, indent=2)
+
+        filing.gstr1_json_path = json_path
+        _log('compile_monthly_gst', store_id=store_id, period=period, invoices=len(gst_txns))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 14. update_gst_transactions_task
+# ──────────────────────────────────────────────────────────────────────────────
+@shared_task(name="tasks.update_gst_transactions_task", bind=True, max_retries=3)
+def update_gst_transactions_task(self):
+    """Sweep for transactions in the current period missing GST rows and backfill them."""
+    from app.models import (
+        Transaction, TransactionItem, Product, StoreGSTConfig,
+        GSTTransaction, HSNMaster, Category
+    )
+
+    with task_session() as session:
+        current_period = datetime.utcnow().strftime('%Y-%m')
+
+        # Find GST-enabled stores
+        configs = session.query(StoreGSTConfig).filter_by(is_gst_enabled=True, registration_type='REGULAR').all()
+
+        for config in configs:
+            store_id = config.store_id
+
+            # Find transactions in current period without a GST row
+            existing_gst_txn_ids = session.query(GSTTransaction.transaction_id).filter_by(
+                store_id=store_id, period=current_period
+            ).subquery()
+
+            txns = session.query(Transaction).filter(
+                Transaction.store_id == store_id,
+                Transaction.created_at >= datetime.strptime(current_period + '-01', '%Y-%m-%d'),
+                Transaction.is_return == False,
+                ~Transaction.transaction_id.in_(existing_gst_txn_ids)
+            ).all()
+
+            for txn in txns:
+                items = session.query(TransactionItem).filter_by(transaction_id=txn.transaction_id).all()
+                hsn_breakdown = {}
+                total_taxable = Decimal('0')
+                total_cgst = Decimal('0')
+                total_sgst = Decimal('0')
+
+                for item in items:
+                    product = session.query(Product).filter_by(product_id=item.product_id).first()
+                    if not product:
+                        continue
+
+                    cat = getattr(product, 'gst_category', 'REGULAR') or 'REGULAR'
+                    if cat in ('EXEMPT', 'ZERO'):
+                        continue
+
+                    gst_rate = Decimal('0')
+                    hsn_code_val = getattr(product, 'hsn_code', None) or 'NONE'
+                    if product.hsn_code:
+                        hsn_entry = session.query(HSNMaster).filter_by(hsn_code=product.hsn_code).first()
+                        if hsn_entry and hsn_entry.default_gst_rate:
+                            gst_rate = Decimal(str(hsn_entry.default_gst_rate))
+                    if gst_rate == 0 and product.category_id:
+                        category = session.query(Category).filter_by(category_id=product.category_id).first()
+                        if category and category.gst_rate:
+                            gst_rate = Decimal(str(category.gst_rate))
+                    if gst_rate == 0:
+                        continue
+
+                    qty = Decimal(str(item.quantity or 0))
+                    sp = Decimal(str(item.selling_price or 0))
+                    disc = Decimal(str(item.discount_amount or 0))
+                    line_total = qty * sp - disc
+                    taxable = line_total / (1 + gst_rate / 100)
+                    tax = line_total - taxable
+                    cgst = tax / 2
+                    sgst = tax / 2
+
+                    total_taxable += taxable
+                    total_cgst += cgst
+                    total_sgst += sgst
+
+                    if hsn_code_val not in hsn_breakdown:
+                        hsn_breakdown[hsn_code_val] = {'taxable': 0, 'cgst': 0, 'sgst': 0, 'igst': 0, 'rate': float(gst_rate)}
+                    hsn_breakdown[hsn_code_val]['taxable'] += float(round(taxable, 2))
+                    hsn_breakdown[hsn_code_val]['cgst'] += float(round(cgst, 2))
+                    hsn_breakdown[hsn_code_val]['sgst'] += float(round(sgst, 2))
+
+                if total_taxable > 0 or total_cgst > 0:
+                    gst_row = GSTTransaction(
+                        transaction_id=txn.transaction_id,
+                        store_id=store_id,
+                        period=current_period,
+                        taxable_amount=round(total_taxable, 2),
+                        cgst_amount=round(total_cgst, 2),
+                        sgst_amount=round(total_sgst, 2),
+                        igst_amount=Decimal('0'),
+                        total_gst=round(total_cgst + total_sgst, 2),
+                        hsn_breakdown=hsn_breakdown
+                    )
+                    session.add(gst_row)
+
+        _log('update_gst_transactions_task', stores_checked=len(configs))
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CHAIN & MULTI-STORE TASKS
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, name='tasks.aggregate_chain_daily_all_groups')
+def aggregate_chain_daily_all_groups(self):
+    """Orchestrator to run daily aggregation for all chain groups"""
+    with task_session() as session:
+        groups = session.execute(text("SELECT id FROM store_groups")).fetchall()
+        for g in groups:
+            aggregate_chain_daily.delay(str(g.id))
+
+
+@shared_task(bind=True, name='tasks.aggregate_chain_daily', max_retries=3)
+def aggregate_chain_daily(self, group_id_str):
+    """
+    Rolls up DailyStoreSummary sums into ChainDailyAggregate for the group.
+    """
+    today = date_type.today()
+    lock_key = f"lock:chain_agg:{group_id_str}:{today}"
+    with _RedisLock(lock_key, ttl=1800) as acquired:
+        if not acquired:
+            return
+
+        with task_session() as session:
+            memberships = session.execute(
+                text("SELECT store_id FROM store_group_memberships WHERE group_id = :gid"),
+                {"gid": group_id_str}
+            ).fetchall()
+
+            for m in memberships:
+                daily_sum = session.execute(text("""
+                    SELECT revenue, profit, transaction_count
+                    FROM daily_store_summary
+                    WHERE store_id = :sid AND date = :tdate
+                """), {"sid": m.store_id, "tdate": str(today)}).fetchone()
+
+                if not daily_sum:
+                    continue
+
+                session.execute(text("""
+                    INSERT INTO chain_daily_aggregates (id, group_id, store_id, date, revenue, profit, transaction_count)
+                    VALUES (:id, :gid, :sid, :tdate, :rev, :prof, :tx_count)
+                    ON CONFLICT (group_id, store_id, date)
+                    DO UPDATE SET revenue = EXCLUDED.revenue, profit = EXCLUDED.profit, transaction_count = EXCLUDED.transaction_count
+                """), {
+                    "id": str(uuid.uuid4()),
+                    "gid": group_id_str,
+                    "sid": m.store_id,
+                    "tdate": str(today),
+                    "rev": float(daily_sum.revenue) if daily_sum.revenue else 0.0,
+                    "prof": float(daily_sum.profit) if daily_sum.profit else 0.0,
+                    "tx_count": daily_sum.transaction_count
+                })
+            session.commit()
+
+
+@shared_task(bind=True, name='tasks.detect_transfer_opportunities_all_groups')
+def detect_transfer_opportunities_all_groups(self):
+    """Orchestrator to run transfer detection for all groups weekly"""
+    with task_session() as session:
+        groups = session.execute(text("SELECT id FROM store_groups")).fetchall()
+        for g in groups:
+            detect_transfer_opportunities.delay(str(g.id))
+
+
+@shared_task(bind=True, name='tasks.detect_transfer_opportunities', max_retries=3)
+def detect_transfer_opportunities(self, group_id_str):
+    """
+    Finds critical reorder alerts. Matches them with surplus stock in sibling stores
+    and generates an InterStoreTransferSuggestion.
+    """
+    lock_key = f"lock:transfer_opp:{group_id_str}:{date_type.today()}"
+    with _RedisLock(lock_key, ttl=3600) as acquired:
+        if not acquired:
+            return
+
+        with task_session() as session:
+            memberships = session.execute(
+                text("SELECT store_id FROM store_group_memberships WHERE group_id = :gid"),
+                {"gid": group_id_str}
+            ).fetchall()
+            store_ids = [m.store_id for m in memberships]
+
+            if len(store_ids) < 2:
+                return
+
+            placeholder = ", ".join(str(sid) for sid in store_ids)
+
+            critical_alerts = session.execute(text(
+                "SELECT store_id, product_id FROM alerts"
+                " WHERE alert_type IN ('LOW_STOCK', 'STOCKOUT_SOON')"
+                " AND priority = 'CRITICAL'"
+                " AND resolved_at IS NULL"
+                f" AND store_id IN ({placeholder})"
+            )).fetchall()
+
+            for alert in critical_alerts:
+                short_store = alert.store_id
+                pid = alert.product_id
+
+                surplus_candidates = session.execute(text(
+                    "SELECT p.store_id, p.current_stock, p.reorder_level"
+                    " FROM products p"
+                    " WHERE p.product_id = :pid"
+                    f" AND p.store_id IN ({placeholder})"
+                    " AND p.store_id != :short_store"
+                    " AND p.current_stock > (p.reorder_level * 1.5)"
+                    " AND NOT EXISTS ("
+                    "   SELECT 1 FROM alerts a"
+                    "   WHERE a.store_id = p.store_id"
+                    "   AND a.product_id = p.product_id"
+                    "   AND a.priority = 'CRITICAL'"
+                    "   AND a.resolved_at IS NULL"
+                    " )"
+                ), {"pid": pid, "short_store": short_store}).fetchall()
+
+                if not surplus_candidates:
+                    continue
+
+                best_target = max(surplus_candidates, key=lambda x: x.current_stock)
+                suggested_qty = round(
+                    (float(best_target.current_stock) - float(best_target.reorder_level)) * 0.5
+                )
+
+                if suggested_qty <= 0:
+                    continue
+
+                session.execute(text("""
+                    INSERT INTO inter_store_transfer_suggestions
+                        (id, group_id, from_store_id, to_store_id, product_id, suggested_qty, reason)
+                    VALUES (:id, :gid, :from_store, :to_store, :pid, :qty, :reason)
+                """), {
+                    "id": str(uuid.uuid4()),
+                    "gid": group_id_str,
+                    "from_store": best_target.store_id,
+                    "to_store": short_store,
+                    "pid": pid,
+                    "qty": suggested_qty,
+                    "reason": f"Surplus identified in sibling Store {best_target.store_id}"
+                })
+
+            session.commit()

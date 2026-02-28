@@ -83,7 +83,7 @@ class TestRunForecast:
         dates, vals = self._make_dates_vals(30)
         result = run_forecast(dates, vals, horizon=7)
         assert isinstance(result, ForecastResult)
-        assert result.model_type == 'linear_regression'
+        assert result.model_type == 'ridge'
         assert len(result.points) == 7
 
     def test_forecast_points_non_negative(self):
@@ -121,7 +121,7 @@ class TestRunForecast:
         dates, vals = self._make_dates_vals(60)  # enough for Prophet threshold
         with patch('app.forecasting.engine._prophet_forecast', side_effect=RuntimeError("Prophet unavailable")):
             result = run_forecast(dates, vals, horizon=7)
-        assert result.model_type == 'linear_regression'
+        assert result.model_type == 'ridge'
         assert len(result.points) == 7
 
     def test_prophet_used_when_60_days(self):
@@ -164,8 +164,8 @@ class TestForecastingEndpoints:
                 lower_bound=90.0 + i,
                 upper_bound=115.0 + i,
                 regime='Stable',
-                model_type='linear_regression',
-                training_window_days=30,
+                model_type='ridge' if getattr(self, '_override_model', None) is None else self._override_model,
+                training_window_days=getattr(self, '_override_window', 30),
                 generated_at=None,
             )
             _db.session.add(row)
@@ -181,20 +181,22 @@ class TestForecastingEndpoints:
         self._seed_forecast_cache(test_store.store_id, product_id=None, n=7)
         resp = client.get('/api/v1/forecasting/store?horizon=7', headers=owner_headers)
         assert resp.status_code == 200
-        data = resp.get_json()['data']
+        data = resp.get_json()['data']['forecast']
         assert len(data) == 7
         for pt in data:
             assert 'date' in pt
-            assert 'forecast_mean' in pt
+            assert 'predicted' in pt
             assert 'lower_bound' in pt
             assert 'upper_bound' in pt
 
     def test_store_forecast_meta_contains_regime(self, client, owner_headers, test_store):
+        self._override_model = 'ridge'
         self._seed_forecast_cache(test_store.store_id, product_id=None, n=7)
         resp = client.get('/api/v1/forecasting/store', headers=owner_headers)
         meta = resp.get_json()['meta']
         assert meta['regime'] == 'Stable'
-        assert meta['model_type'] == 'linear_regression'
+        assert meta['model_type'] == 'ridge'
+        assert meta['confidence_tier'] == 'ridge'
 
     # -- SKU-level --
 
@@ -213,7 +215,7 @@ class TestForecastingEndpoints:
             headers=owner_headers,
         )
         assert resp.status_code == 200
-        data = resp.get_json()['data']
+        data = resp.get_json()['data']['forecast']
         assert len(data) == 7
 
     def test_sku_forecast_reorder_suggestion(self, client, owner_headers, test_store, test_product):
@@ -229,6 +231,55 @@ class TestForecastingEndpoints:
         assert 'current_stock' in reorder
         assert 'suggested_order_qty' in reorder
         assert reorder['suggested_order_qty'] >= 0.0
+
+    def test_forecast_ridge_tier_null_bounds(self, client, owner_headers, test_store, test_product):
+        """Seed 20 days of data (< 60), assert lower_bound is None and confidence_tier == 'ridge'."""
+        self._override_model = 'ridge'
+        self._override_window = 20
+        # Seed 20 days of historical data
+        today = date.today()
+        for i in range(20):
+            d = today - timedelta(days=i)
+            _db.session.add(DailySkuSummary(
+                date=d, store_id=test_store.store_id, product_id=test_product.product_id, units_sold=5+i
+            ))
+        _db.session.commit()
+
+        self._seed_forecast_cache(test_store.store_id, product_id=test_product.product_id, n=7)
+        resp = client.get(f'/api/v1/forecasting/sku/{test_product.product_id}', headers=owner_headers)
+        data = resp.get_json()['data']
+        meta = resp.get_json()['meta']
+        
+        assert meta['confidence_tier'] == 'ridge'
+        assert len(data['historical']) == 20
+        for pt in data['forecast']:
+            assert pt['lower_bound'] is None
+            assert pt['upper_bound'] is None
+
+    def test_forecast_flat_tier_null_bounds(self, client, owner_headers, test_store, test_product):
+        """Seed 5 days of data, assert confidence_tier == 'flat' and bounds are null."""
+        self._override_model = 'flat'
+        self._override_window = 5
+        # Seed 5 days of historical data
+        today = date.today()
+        for i in range(5):
+            d = today - timedelta(days=i)
+            _db.session.add(DailySkuSummary(
+                date=d, store_id=test_store.store_id, product_id=test_product.product_id, units_sold=2
+            ))
+        _db.session.commit()
+
+        self._seed_forecast_cache(test_store.store_id, product_id=test_product.product_id, n=7)
+        resp = client.get(f'/api/v1/forecasting/sku/{test_product.product_id}', headers=owner_headers)
+        data = resp.get_json()['data']
+        meta = resp.get_json()['meta']
+        
+        assert meta['confidence_tier'] == 'flat'
+        assert len(data['historical']) == 5
+        for pt in data['forecast']:
+            assert pt['lower_bound'] is None
+            assert pt['upper_bound'] is None
+
 
 
 # ── Batch task helper: _upsert_forecast (integration-level) ──────────────────
@@ -253,7 +304,7 @@ class TestUpsertForecast:
         result = ForecastResult(
             points=points,
             regime='Trending',
-            model_type='linear_regression',
+            model_type='ridge',
             training_window_days=30,
         )
 
@@ -270,7 +321,7 @@ class TestUpsertForecast:
 
             assert len(rows) == HORIZON_DAYS
             assert rows[0].regime == 'Trending'
-            assert rows[0].model_type == 'linear_regression'
+            assert rows[0].model_type == 'ridge'
             assert rows[0].training_window_days == 30
             assert float(rows[0].forecast_value) == pytest.approx(51.0, abs=0.01)
 
@@ -289,7 +340,7 @@ class TestUpsertForecast:
                 upper_bound=90.0,
             )
         ]
-        result = ForecastResult(points=points, regime='Stable', model_type='linear_regression', training_window_days=20)
+        result = ForecastResult(points=points, regime='Stable', model_type='ridge', training_window_days=20)
 
         with app.app_context():
             session = _db.session

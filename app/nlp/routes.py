@@ -121,6 +121,42 @@ def handle_query():
             supporting_metrics = {"top_products": top_list}
         else:
             detail = "No sales data available for the last 30 days."
+
+    elif intent == "loyalty_summary":
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc)
+        start_date = f"{today.year}-{today.month:02d}-01"
+        
+        row = db.session.execute(text("""
+            SELECT 
+                (SELECT COUNT(*) FROM customer_loyalty_accounts WHERE store_id = :sid) as enrolled,
+                (SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions lt
+                 JOIN customer_loyalty_accounts c ON c.id = lt.account_id
+                 WHERE c.store_id = :sid AND lt.type = 'EARN' AND lt.created_at >= :start_date) as issued,
+                (SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions lt
+                 JOIN customer_loyalty_accounts c ON c.id = lt.account_id
+                 WHERE c.store_id = :sid AND lt.type = 'REDEEM' AND lt.created_at >= :start_date) as redeemed
+        """), {"sid": store_id, "start_date": start_date}).fetchone()
+        
+        enrolled = int(row.enrolled) if row else 0
+        issued = float(row.issued) if row else 0
+        redeemed = abs(float(row.redeemed)) if row else 0
+        
+        detail = tmpl["detail_template"].format(enrolled=enrolled, issued=format_unit(issued, 'point'), redeemed=format_unit(redeemed, 'point'))
+        supporting_metrics = {"enrolled_customers": enrolled, "points_issued": issued, "points_redeemed": redeemed}
+        
+    elif intent == "credit_overdue":
+        row = db.session.execute(text("""
+            SELECT COUNT(*) as overdue_count, COALESCE(SUM(balance), 0) as total_overdue
+            FROM credit_ledger
+            WHERE store_id = :sid AND balance > 0 AND updated_at < CURRENT_DATE - 30
+        """), {"sid": store_id}).fetchone()
+        
+        count = int(row.overdue_count) if row else 0
+        total_overdue = float(row.total_overdue) if row else 0
+        
+        detail = tmpl["detail_template"].format(count=count, total_overdue=format_currency(total_overdue))
+        supporting_metrics = {"overdue_customers": count, "total_overdue_amount": total_overdue}
             
     else:
         detail = tmpl["detail_template"].format(value="system baseline", stock="0", reorder="0", deficit="0", margin="0")

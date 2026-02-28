@@ -96,7 +96,7 @@ def _linear_regression_forecast(
     history: pd.DataFrame,
     horizon: int,
     interval_width: float = 0.80,
-) -> list[ForecastPoint]:
+) -> tuple[list[ForecastPoint], str]:
     """
     Features: day_of_week (one-hot), days_since_start, lag_7, lag_14.
     Target: units_sold.
@@ -118,7 +118,7 @@ def _linear_regression_forecast(
     if df_train.empty:
         # Fallback: return mean
         mean_val = max(0.0, float(df['y'].mean()))
-        return _flat_forecast(history, horizon, mean_val, interval_width)
+        return _flat_forecast(history, horizon, mean_val, interval_width), 'flat'
 
     X = df_train[['dow', 'days_since_start', 'lag_7', 'lag_14']].values
     y = df_train['y'].values
@@ -157,7 +157,7 @@ def _linear_regression_forecast(
             lower_bound=round(max(0.0, pred - z * sigma), 3),
             upper_bound=round(pred + z * sigma, 3),
         ))
-    return points
+    return points, 'ridge'
 
 
 def _flat_forecast(history: pd.DataFrame, horizon: int, value: float, interval_width: float) -> list[ForecastPoint]:
@@ -263,15 +263,16 @@ def run_forecast(
 
     # Linear regression fallback
     try:
-        points = _linear_regression_forecast(history, horizon, interval_width)
+        points, m_type = _linear_regression_forecast(history, horizon, interval_width)
     except Exception as exc:
         logger.warning("Linear regression failed (%s); using flat mean", exc)
         mean_val = max(0.0, float(history['y'].mean()))
         points = _flat_forecast(history, horizon, mean_val, interval_width)
+        m_type = 'flat'
 
     return ForecastResult(
         points=points,
         regime=regime,
-        model_type='linear_regression',
+        model_type=m_type,
         training_window_days=training_window_days,
     )

@@ -117,3 +117,51 @@ def aggregate_by_period(rows: list[dict], group_by: str, numeric_keys: list[str]
         entry = {'date': period, **{k: round(buckets[period][k], 4) for k in numeric_keys}}
         result.append(entry)
     return result
+
+
+# ── Zero-fill helpers ─────────────────────────────────────────────────────────
+
+def zero_fill_date_range(
+    rows: list[dict],
+    start: date,
+    end: date,
+    value_keys: list[str],
+    date_key: str = 'date',
+) -> list[dict]:
+    """
+    Ensure every calendar day in [start, end] is present, filling missing days
+    with 0 for every key in *value_keys*.
+
+    rows: list of dicts with a string or date under *date_key*.
+    Returns list sorted by date ascending.
+    """
+    existing: dict[str, dict] = {}
+    for row in rows:
+        d = row[date_key]
+        if not isinstance(d, str):
+            d = str(d)
+        existing[d] = row
+
+    result = []
+    cursor = start
+    while cursor <= end:
+        key = cursor.isoformat()
+        if key in existing:
+            entry = dict(existing[key])
+        else:
+            entry = {date_key: key, **{k: 0.0 for k in value_keys}}
+        result.append(entry)
+        cursor += timedelta(days=1)
+    return result
+
+
+def build_7d_revenue_series(rows: list[dict], today: date) -> list[dict]:
+    """
+    From DB rows (may be sparse), build an array of exactly 7 dicts
+    [{date: 'YYYY-MM-DD', revenue: float}] covering the last 7 days
+    (today-6 .. today), zero-filling any missing days.
+    """
+    week_start = today - timedelta(days=6)
+    filled = zero_fill_date_range(rows, week_start, today, ['revenue'], date_key='date')
+    # Keep only the date and revenue fields
+    return [{'date': r['date'], 'revenue': float(r.get('revenue') or 0.0)} for r in filled]

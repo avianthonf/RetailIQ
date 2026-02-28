@@ -25,12 +25,17 @@ def _store_id() -> int:
 
 
 def _rows_to_points(rows) -> list[dict]:
+    if not rows:
+        return []
+    m_type = getattr(rows[0], 'model_type', 'flat')
+    is_prophet = (m_type == 'prophet')
+    
     return [
         {
             'date':          str(r.forecast_date),
-            'forecast_mean': float(r.forecast_value or 0),
-            'lower_bound':   float(r.lower_bound or 0),
-            'upper_bound':   float(r.upper_bound or 0),
+            'predicted':     float(r.forecast_value or 0),
+            'lower_bound':   float(r.lower_bound or 0) if is_prophet else None,
+            'upper_bound':   float(r.upper_bound or 0) if is_prophet else None,
         }
         for r in rows
     ]
@@ -70,13 +75,33 @@ def forecast_store_endpoint():
             meta=None,
         )), 404
 
+    points = _rows_to_points(rows)
+    m_type = getattr(rows[0], 'model_type', 'flat')
+    confidence_tier = m_type
+
+    # Historical data
+    window = getattr(rows[0], 'training_window_days', 30)
+    if not isinstance(window, int) or window <= 0:
+        window = 30
+        
+    hist_start = today - timedelta(days=window)
+    hist_rows = db.session.execute(text("""
+        SELECT date, units_sold
+        FROM daily_store_summary
+        WHERE store_id = :sid AND date > :hist_start AND date <= :today
+        ORDER BY date ASC
+    """), {'sid': sid, 'hist_start': str(hist_start), 'today': str(today)}).fetchall()
+    
+    historical = [{'date': str(r.date), 'actual': float(r.units_sold or 0)} for r in hist_rows]
+
     meta = {
         'regime':               rows[0].regime,
-        'model_type':           getattr(rows[0], 'model_type', None),
-        'training_window_days': getattr(rows[0], 'training_window_days', None),
+        'model_type':           m_type,
+        'confidence_tier':      confidence_tier,
+        'training_window_days': window,
         'generated_at':         str(rows[0].generated_at),
     }
-    return jsonify(format_response(data=_rows_to_points(rows), meta=meta))
+    return jsonify(format_response(data={'historical': historical, 'forecast': points}, meta=meta))
 
 
 # ── SKU-level forecast ────────────────────────────────────────────────────────
@@ -133,9 +158,26 @@ def forecast_sku_endpoint(product_id: int):
         )), 404
 
     points = _rows_to_points(rows)
+    m_type = getattr(rows[0], 'model_type', 'flat')
+    confidence_tier = m_type
+
+    # Historical data
+    window = getattr(rows[0], 'training_window_days', 30)
+    if not isinstance(window, int) or window <= 0:
+        window = 30
+        
+    hist_start = today - timedelta(days=window)
+    hist_rows = db.session.execute(text("""
+        SELECT date, units_sold
+        FROM daily_sku_summary
+        WHERE store_id = :sid AND product_id = :pid AND date > :hist_start AND date <= :today
+        ORDER BY date ASC
+    """), {'sid': sid, 'pid': product_id, 'hist_start': str(hist_start), 'today': str(today)}).fetchall()
+    
+    historical = [{'date': str(r.date), 'actual': float(r.units_sold or 0)} for r in hist_rows]
 
     # Reorder suggestion
-    total_forecast_demand = sum(p['forecast_mean'] for p in points)
+    total_forecast_demand = sum(p['predicted'] for p in points)
     current_stock = float(product_row.current_stock or 0)
     reorder_level = float(product_row.reorder_level or 0)
     lead_time     = int(product_row.lead_time_days or 3)
@@ -156,9 +198,10 @@ def forecast_sku_endpoint(product_id: int):
         'product_id':           product_id,
         'product_name':         product_row.name,
         'regime':               rows[0].regime,
-        'model_type':           getattr(rows[0], 'model_type', None),
-        'training_window_days': getattr(rows[0], 'training_window_days', None),
+        'model_type':           m_type,
+        'confidence_tier':      confidence_tier,
+        'training_window_days': window,
         'generated_at':         str(rows[0].generated_at),
         'reorder_suggestion':   reorder_suggestion,
     }
-    return jsonify(format_response(data=points, meta=meta))
+    return jsonify(format_response(data={'historical': historical, 'forecast': points}, meta=meta))

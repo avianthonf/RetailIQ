@@ -69,3 +69,55 @@ def test_refresh_token_rotation_and_logout(client, app, monkeypatch):
 
     replay_resp = client.post("/api/v1/auth/refresh", json={"refresh_token": rotated})
     assert replay_resp.status_code == 401
+
+
+def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
+    """After registration + OTP verification the endpoint returns JWT tokens (auto-login)."""
+    fake = FakeRedis()
+
+    monkeypatch.setattr("app.auth.utils.get_redis_client", lambda: fake)
+    monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: fake)
+
+    # 1. Register a new user
+    register_resp = client.post("/api/v1/auth/register", json={
+        "full_name": "OTP Test User",
+        "mobile_number": "9222222222",
+        "password": "secret123",
+        "store_name": "OTP Store",
+    })
+    assert register_resp.status_code == 201
+
+    # Grab the OTP from the fake redis
+    otp = fake.get("otp:9222222222")
+    assert otp is not None
+
+    # 2. Verify OTP
+    verify_resp = client.post("/api/v1/auth/verify-otp", json={
+        "mobile_number": "9222222222",
+        "otp": otp,
+    })
+    assert verify_resp.status_code == 200
+
+    data = verify_resp.get_json()
+    assert data["success"] is True
+
+    # 3. Verify the response contains auth tokens (auto-login)
+    verify_data = data["data"]
+    assert "access_token" in verify_data
+    assert "refresh_token" in verify_data
+    assert "user_id" in verify_data
+    assert "role" in verify_data
+    assert verify_data["role"] == "owner"
+    assert "store_id" in verify_data
+    assert verify_data["store_id"] is not None
+
+    # 4. The access token should be valid for authenticated requests
+    access = verify_data["access_token"]
+    # Try hitting a protected endpoint (e.g. logout)
+    protected_resp = client.delete(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {access}"},
+        json={"refresh_token": verify_data["refresh_token"]},
+    )
+    assert protected_resp.status_code == 200
+

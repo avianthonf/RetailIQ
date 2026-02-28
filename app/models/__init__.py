@@ -5,7 +5,7 @@ from typing import Optional
 from flask import Blueprint
 from sqlalchemy import (
     String, Integer, Boolean, Numeric, TIMESTAMP, ForeignKey,
-    Enum as SQLEnum, Text, Time, Date, Index, text, UniqueConstraint
+    Enum as SQLEnum, Text, Time, Date, Index, text, UniqueConstraint, CheckConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -75,6 +75,15 @@ class Product(Base):
     image_url: Mapped[Optional[str]] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     lead_time_days: Mapped[Optional[int]] = mapped_column(Integer, default=3)
+    
+    # GST Fields
+    hsn_code: Mapped[Optional[str]] = mapped_column(String(8), ForeignKey('hsn_master.hsn_code'), nullable=True)
+    gst_category: Mapped[Optional[str]] = mapped_column(
+        String(16), 
+        CheckConstraint("gst_category IN ('EXEMPT', 'ZERO', 'REGULAR')"), 
+        server_default='REGULAR',
+        default='REGULAR'
+    )
 
     __table_args__ = (
         Index('idx_products_store_sku', 'store_id', 'sku_code', unique=True),
@@ -116,9 +125,11 @@ class Transaction(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     is_return: Mapped[bool] = mapped_column(Boolean, default=False)
     original_transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), nullable=True)
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('staff_sessions.id'), nullable=True)
 
     __table_args__ = (
         Index('idx_transactions_store_created', 'store_id', text('created_at DESC')),
+        Index('idx_transactions_session_id', 'session_id'),
     )
 
 class TransactionItem(Base):
@@ -246,3 +257,370 @@ class DailySkuSummary(Base):
     __table_args__ = (
         Index('idx_daily_sku_summary_store_product_date', 'store_id', 'product_id', text('date DESC')),
     )
+
+class Supplier(Base):
+    __tablename__ = 'suppliers'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    contact_name: Mapped[Optional[str]] = mapped_column(String(128))
+    phone: Mapped[Optional[str]] = mapped_column(String(20))
+    email: Mapped[Optional[str]] = mapped_column(String(128))
+    address: Mapped[Optional[str]] = mapped_column(Text)
+    payment_terms_days: Mapped[Optional[int]] = mapped_column(Integer, default=30)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class SupplierProduct(Base):
+    __tablename__ = 'supplier_products'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('products.product_id'))
+    quoted_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    lead_time_days: Mapped[Optional[int]] = mapped_column(Integer)
+    is_preferred_supplier: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_updated: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('supplier_id', 'product_id', name='uq_supplier_product'),
+    )
+
+class PurchaseOrder(Base):
+    __tablename__ = 'purchase_orders'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('suppliers.id'))
+    status: Mapped[Optional[str]] = mapped_column(String(16), default='DRAFT')
+    expected_delivery_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('users.user_id'))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class PurchaseOrderItem(Base):
+    __tablename__ = 'purchase_order_items'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('purchase_orders.id'))
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('products.product_id'))
+    ordered_qty: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False)
+    received_qty: Mapped[Optional[float]] = mapped_column(Numeric(12, 3), default=0)
+    unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
+
+class GoodsReceiptNote(Base):
+    __tablename__ = 'goods_receipt_notes'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    po_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('purchase_orders.id'))
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    received_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('users.user_id'))
+    received_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+class Barcode(Base):
+    __tablename__ = 'barcodes'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('products.product_id'), nullable=False)
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    barcode_value: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    barcode_type: Mapped[Optional[str]] = mapped_column(String(16), default='EAN13')
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index('idx_barcodes_store_product', 'store_id', 'product_id'),
+    )
+
+
+class ReceiptTemplate(Base):
+    __tablename__ = 'receipt_templates'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False, unique=True)
+    header_text: Mapped[Optional[str]] = mapped_column(Text)
+    footer_text: Mapped[Optional[str]] = mapped_column(Text)
+    show_gstin: Mapped[bool] = mapped_column(Boolean, default=False)
+    paper_width_mm: Mapped[int] = mapped_column(Integer, default=80)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+class PrintJob(Base):
+    __tablename__ = 'print_jobs'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), nullable=True)
+    job_type: Mapped[Optional[str]] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default='PENDING')
+    payload: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+
+    __table_args__ = (
+        Index('idx_print_jobs_store_status', 'store_id', 'status'),
+    )
+
+class StaffSession(Base):
+    __tablename__ = 'staff_sessions'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.utc))
+    ended_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), server_default='OPEN', nullable=False)
+    target_revenue: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    
+    __table_args__ = (
+        # Used for check constraints in migrations
+    )
+
+class StaffDailyTarget(Base):
+    __tablename__ = 'staff_daily_targets'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    revenue_target: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    transaction_count_target: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('store_id', 'user_id', 'target_date', name='uq_staff_daily_target_store_user_date'),
+    )
+
+class AnalyticsSnapshot(Base):
+    __tablename__ = 'analytics_snapshots'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False, unique=True)
+    snapshot_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    built_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer)
+
+class LoyaltyProgram(Base):
+    __tablename__ = 'loyalty_programs'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), unique=True, nullable=False)
+    points_per_rupee: Mapped[Optional[float]] = mapped_column(Numeric(6, 4), default=1.0, server_default='1.0')
+    redemption_rate: Mapped[Optional[float]] = mapped_column(Numeric(6, 4), default=0.1, server_default='0.1')
+    min_redemption_points: Mapped[Optional[int]] = mapped_column(Integer, default=100, server_default='100')
+    expiry_days: Mapped[Optional[int]] = mapped_column(Integer, default=365, server_default='365')
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
+
+class CustomerLoyaltyAccount(Base):
+    __tablename__ = 'customer_loyalty_accounts'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[int] = mapped_column(Integer, ForeignKey('customers.customer_id'), unique=True, nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    total_points: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), default=0, server_default='0')
+    redeemable_points: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), default=0, server_default='0')
+    lifetime_earned: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), default=0, server_default='0')
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+
+class LoyaltyTransaction(Base):
+    __tablename__ = 'loyalty_transactions'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('customer_loyalty_accounts.id'), nullable=False)
+    transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), nullable=True)
+    type: Mapped[str] = mapped_column(String(16), nullable=False)
+    points: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    balance_after: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("type IN ('EARN', 'REDEEM', 'EXPIRE', 'ADJUST')", name='chk_loyalty_txn_type'),
+    )
+
+class CreditLedger(Base):
+    __tablename__ = 'credit_ledger'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[int] = mapped_column(Integer, ForeignKey('customers.customer_id'), nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    balance: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), default=0, server_default='0')
+    credit_limit: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), default=0, server_default='0')
+    updated_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint('customer_id', 'store_id', name='uq_credit_ledger_cust_store'),
+    )
+
+class CreditTransaction(Base):
+    __tablename__ = 'credit_transactions'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ledger_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('credit_ledger.id'), nullable=False)
+    transaction_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), nullable=True)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=False)
+    balance_after: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=False)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    notes: Mapped[Optional[str]] = mapped_column(String)
+
+    __table_args__ = (
+        CheckConstraint("type IN ('CREDIT_SALE', 'REPAYMENT', 'ADJUSTMENT')", name='chk_credit_tx_type'),
+    )
+
+class HSNMaster(Base):
+    __tablename__ = 'hsn_master'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hsn_code: Mapped[str] = mapped_column(String(8), unique=True, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    default_gst_rate: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+
+class StoreGSTConfig(Base):
+    __tablename__ = 'store_gst_config'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), unique=True, nullable=False)
+    gstin: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)
+    registration_type: Mapped[Optional[str]] = mapped_column(
+        String(16), 
+        CheckConstraint("registration_type IN ('REGULAR', 'COMPOSITION', 'UNREGISTERED')"),
+        server_default='REGULAR',
+        default='REGULAR'
+    )
+    state_code: Mapped[Optional[str]] = mapped_column(String(2))
+    is_gst_enabled: Mapped[bool] = mapped_column(Boolean, server_default='false', default=False)
+
+class GSTTransaction(Base):
+    __tablename__ = 'gst_transactions'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), unique=True, nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    taxable_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    cgst_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    sgst_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    igst_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    total_gst: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    hsn_breakdown: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+class GSTFilingPeriod(Base):
+    __tablename__ = 'gst_filing_periods'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    total_taxable: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    total_cgst: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    total_sgst: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    total_igst: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    invoice_count: Mapped[Optional[int]] = mapped_column(Integer)
+    gstr1_json_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    compiled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(16), server_default='DRAFT', default='DRAFT')
+
+    __table_args__ = (
+        UniqueConstraint('store_id', 'period', name='uq_store_period'),
+    )
+
+
+# ---------------------------------------------------------------------------
+# WHATSAPP INTEGRATION MODELS
+# ---------------------------------------------------------------------------
+
+class WhatsAppConfig(Base):
+    __tablename__ = 'whatsapp_config'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False, unique=True)
+    phone_number_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    webhook_verify_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default='false', default=False)
+    waba_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class WhatsAppTemplate(Base):
+    __tablename__ = 'whatsapp_templates'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    template_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    template_category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    language: Mapped[str] = mapped_column(String(10), server_default='en', default='en')
+    variables: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default='true', default=True)
+
+
+class WhatsAppMessageLog(Base):
+    __tablename__ = 'whatsapp_message_log'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    recipient_phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    direction: Mapped[str] = mapped_column(String(8), server_default='OUT', default='OUT')
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    template_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    content_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    wa_message_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), server_default='QUEUED', default='QUEUED')
+    sent_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+# ---------------------------------------------------------------------------
+# CHAIN OWNERSHIP / MULTI-STORE MODELS
+# ---------------------------------------------------------------------------
+
+class StoreGroup(Base):
+    __tablename__ = 'store_groups'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    owner_user_id: Mapped[int] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=False)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+class StoreGroupMembership(Base):
+    __tablename__ = 'store_group_memberships'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('store_groups.id'), nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    manager_user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('group_id', 'store_id', name='uq_group_store'),
+    )
+
+class ChainDailyAggregate(Base):
+    __tablename__ = 'chain_daily_aggregates'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('store_groups.id'), nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    revenue: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    profit: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    transaction_count: Mapped[Optional[int]] = mapped_column(Integer)
+
+    __table_args__ = (
+        UniqueConstraint('group_id', 'store_id', 'date', name='uq_chain_agg_group_store_date'),
+    )
+
+class InterStoreTransferSuggestion(Base):
+    __tablename__ = 'inter_store_transfer_suggestions'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('store_groups.id'), nullable=False)
+    from_store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    to_store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('products.product_id'), nullable=False)
+    suggested_qty: Mapped[Optional[float]] = mapped_column(Numeric(12, 3))
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), server_default='PENDING', default='PENDING')
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
