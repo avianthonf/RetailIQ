@@ -1,0 +1,40 @@
+# ============================================================================
+# RetailIQ — Ruff Configuration
+# ============================================================================
+# Ruff is an extremely fast Python linter/formatter.
+# Docs: https://docs.astral.sh/ruff/
+
+[lint]
+# Enable pyflakes (F), pycodestyle errors (E), isort (I), and a few extras
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+# Rules to ignore project-wide:
+#   E501  — line too long (handled by formatter, not linter)
+#   E402  — module-level import not at top of file (some Flask patterns need this)
+#   F401  — unused imports in __init__.py (re-exports)
+#   B008  — function call in default argument (Flask uses this intentionally)
+ignore = ["E501", "E402", "F401", "B008"]
+
+[lint.per-file-ignores]
+# __init__.py files often re-export symbols
+"__init__.py" = ["F401", "F403"]
+# Migrations have auto-generated code
+"migrations/**" = ["E", "F", "W", "UP", "B", "SIM"]
+# Tests use assert statements and may have long lines
+"tests/**" = ["E501", "B011", "SIM"]
+
+[lint.isort]
+known-first-party = ["app"]
+
+[format]
+# Match Black defaults
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# Don't auto-format migrations
+[format.per-file-ignores]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120

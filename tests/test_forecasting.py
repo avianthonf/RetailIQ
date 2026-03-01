@@ -354,3 +354,206 @@ class TestUpsertForecast:
                 product_id=test_product.product_id,
             ).all()
             assert len(rows) == 1
+
+
+# ── Event-Regressor integration (extends forecasting test coverage) ───────────
+
+class TestEventRegressors:
+    """
+    Integration tests for event regressors in the forecasting engine.
+    Extends coverage of the Prophet event-as-regressor feature and the
+    demand-sensing endpoint. Requires a running Flask app + SQLite in-memory DB.
+
+    Spec deliverables tested here (spec §4 a-e):
+      c. test_prophet_uses_event_regressor
+      d. test_max_5_regressors_enforced
+      e. test_event_regressor_does_not_break_ridge_fallback
+    """
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_store_user_product(app_ctx):
+        """Create an isolated Store + User + Product and return (store, user, product)."""
+        from app.models import Store, User, Product
+        import uuid
+        store = Store(store_name=f"EvStore-{uuid.uuid4().hex[:6]}", currency_symbol="USD")
+        _db.session.add(store)
+        _db.session.commit()
+
+        user = User(
+            mobile_number=f"9{uuid.uuid4().hex[:9]}",
+            store_id=store.store_id,
+            role="owner",
+            is_active=True,
+        )
+        _db.session.add(user)
+        _db.session.commit()
+
+        prod = Product(
+            store_id=store.store_id,
+            name="Regressor Product",
+            sku_code=f"REG-{uuid.uuid4().hex[:6]}",
+            cost_price=5.0,
+            selling_price=10.0,
+            current_stock=50,
+        )
+        _db.session.add(prod)
+        _db.session.commit()
+        return store, user, prod
+
+    @staticmethod
+    def _seed_sku_history(store_id, product_id, days: int, base_demand: float = 10.0):
+        from sqlalchemy import text
+        today = date.today()
+        for i in range(days, 0, -1):
+            d = today - timedelta(days=i)
+            _db.session.execute(
+                text("""
+                    INSERT INTO daily_sku_summary
+                    (store_id, product_id, date, units_sold, revenue, profit, avg_selling_price)
+                    VALUES (:sid, :pid, :d, :qty, :rev, :prof, :asp)
+                """),
+                {"sid": store_id, "pid": product_id, "d": d,
+                 "qty": base_demand, "rev": base_demand * 10.0,
+                 "prof": base_demand * 5.0, "asp": 10.0},
+            )
+        _db.session.commit()
+
+    @staticmethod
+    def _auth_headers(user):
+        from app.auth.utils import generate_access_token
+        token = generate_access_token(user.user_id, user.store_id, user.role)
+        return {"Authorization": f"Bearer {token}"}
+
+    # ── Tests ─────────────────────────────────────────────────────────────────
+
+    def test_prophet_uses_event_regressor(self, client, app):
+        """
+        §4c — seed a product with 90 days of history + one future event; run
+        the demand-sensing endpoint; assert DemandSensingLog is written with
+        active_events containing the event.
+        """
+        from app.models import BusinessEvent, DemandSensingLog
+        with app.app_context():
+            store, user, prod = self._make_store_user_product(app)
+            self._seed_sku_history(store.store_id, prod.product_id, days=90, base_demand=15.0)
+
+            today = date.today()
+            ev = BusinessEvent(
+                store_id=store.store_id,
+                event_name="Diwali Sale",
+                event_type="FESTIVAL",
+                start_date=today + timedelta(days=2),
+                end_date=today + timedelta(days=4),
+                expected_impact_pct=40.0,
+            )
+            _db.session.add(ev)
+            _db.session.commit()
+
+            resp = client.get(
+                f"/api/v1/forecasting/demand-sensing/{prod.product_id}",
+                headers=self._auth_headers(user),
+            )
+            assert resp.status_code == 200
+            assert resp.json["data"]["model_type"] == "prophet"
+
+            logs = _db.session.query(DemandSensingLog).filter_by(
+                product_id=prod.product_id
+            ).all()
+            assert len(logs) == 14  # 14-day horizon
+
+            # Log on an event day must reference the event
+            event_day_log = next(
+                (l for l in logs if l.date == today + timedelta(days=3)), None
+            )
+            assert event_day_log is not None
+            assert len(event_day_log.active_events) == 1
+            assert event_day_log.active_events[0]["event_name"] == "Diwali Sale"
+
+    def test_max_5_regressors_enforced(self, client, app):
+        """
+        §4d — seed 8 overlapping events; run the demand-sensing endpoint;
+        assert DemandSensingLog active_events has max 5 entries and they are the
+        5 with the highest expected_impact_pct.
+        """
+        from app.models import BusinessEvent, DemandSensingLog
+        with app.app_context():
+            store, user, prod = self._make_store_user_product(app)
+            self._seed_sku_history(store.store_id, prod.product_id, days=90)
+
+            today = date.today()
+            evs = [
+                BusinessEvent(
+                    store_id=store.store_id,
+                    event_name=f"Ev-{i}",
+                    event_type="PROMOTION",
+                    start_date=today + timedelta(days=1),
+                    end_date=today + timedelta(days=3),
+                    expected_impact_pct=float(10 + i),  # 10..17
+                )
+                for i in range(8)
+            ]
+            _db.session.add_all(evs)
+            _db.session.commit()
+
+            resp = client.get(
+                f"/api/v1/forecasting/demand-sensing/{prod.product_id}",
+                headers=self._auth_headers(user),
+            )
+            assert resp.status_code == 200
+
+            log = _db.session.query(DemandSensingLog).filter_by(
+                product_id=prod.product_id,
+                date=today + timedelta(days=2),
+            ).first()
+            assert log is not None
+            assert len(log.active_events) == 5  # max 5
+
+            # Confirm they are the top-5 by impact (13..17)
+            logged_names = {e["event_name"] for e in log.active_events}
+            matched = _db.session.query(BusinessEvent).filter(
+                BusinessEvent.event_name.in_(logged_names)
+            ).all()
+            pcts = sorted(float(m.expected_impact_pct) for m in matched)
+            assert pcts == [13.0, 14.0, 15.0, 16.0, 17.0]
+
+    def test_event_regressor_does_not_break_ridge_fallback(self, client, app):
+        """
+        §4e — seed a product with only 20 days of history (forces Ridge tier);
+        events should be ignored by the model but still logged gracefully in
+        DemandSensingLog.
+        """
+        from app.models import BusinessEvent, DemandSensingLog
+        with app.app_context():
+            store, user, prod = self._make_store_user_product(app)
+            self._seed_sku_history(store.store_id, prod.product_id, days=20)
+
+            today = date.today()
+            ev = BusinessEvent(
+                store_id=store.store_id,
+                event_name="Weekend Promo",
+                event_type="PROMOTION",
+                start_date=today + timedelta(days=1),
+                end_date=today + timedelta(days=2),
+                expected_impact_pct=10.0,
+            )
+            _db.session.add(ev)
+            _db.session.commit()
+
+            resp = client.get(
+                f"/api/v1/forecasting/demand-sensing/{prod.product_id}",
+                headers=self._auth_headers(user),
+            )
+            assert resp.status_code == 200
+            assert resp.json["data"]["model_type"] == "ridge"  # falls back
+
+            # Event is recorded in the log even though Ridge doesn't use it
+            log = _db.session.query(DemandSensingLog).filter_by(
+                product_id=prod.product_id,
+                date=today + timedelta(days=1),
+            ).first()
+            assert log is not None
+            assert len(log.active_events) == 1
+            assert log.active_events[0]["event_name"] == "Weekend Promo"
+

@@ -316,12 +316,12 @@ def test_analytics_new_customer(client, owner_headers, test_store, test_product)
 def test_analytics_repeat_customer(client, owner_headers, test_store, test_product):
     """A customer with a prior purchase + one this month should count as repeat."""
     c = _create_customer(test_store.store_id, mobile="9900000002")
-    # Prior purchase (outside this month)
+    # Prior purchase definitively outside this month (60 days ago)
     _make_txn(test_store.store_id, c.customer_id, test_product,
-              days_ago=40, price=80.0)
-    # This month
+              days_ago=60, price=80.0)
+    # This month purchase — use days_ago=0 (today) to avoid month-boundary ambiguity
     _make_txn(test_store.store_id, c.customer_id, test_product,
-              days_ago=1, price=120.0)
+              days_ago=0, price=120.0)
 
     resp = client.get('/api/v1/customers/analytics', headers=owner_headers)
     assert resp.status_code == 200

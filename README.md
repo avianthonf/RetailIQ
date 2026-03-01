@@ -10,6 +10,10 @@ RetailIQ is a modular backend platform for retail operations intelligence. It co
 - barcode registry and receipt printing (barcode lookup, template management, async print jobs),
 - **loyalty & credit** (points-based loyalty programs, credit ledger, atomic POS integration),
 - **GST compliance** (HSN master, GSTIN validation, per-transaction GST recording, GSTR-1 generation),
+- **pricing engine** (competitive price drift detection, margin-optimized suggestions, weekly analysis),
+- **event-aware forecasting** (business event calendar, Prophet external regressors, demand sensing log),
+- **vision / OCR invoice processing** (Tesseract OCR, product fuzzy-matching, human review flow),
+- **security hardening** (rate limiting, FK index audit, input sanitization, log redaction, slow-request detection),
 - asynchronous background processing with Celery.
 
 The platform is designed to run locally and in containerized environments with PostgreSQL + Redis.
@@ -32,13 +36,17 @@ The platform is designed to run locally and in containerized environments with P
 13. [GST Compliance Module](#gst-compliance-module)
 14. [WhatsApp Business Integration](#whatsapp-business-integration)
 15. [Chain Ownership & Multi-store Module](#chain-ownership--multi-store-module)
-16. [Configuration and Environment Variables](#configuration-and-environment-variables)
-17. [Running the System](#running-the-system)
-18. [Testing Strategy](#testing-strategy)
-19. [CI/CD](#cicd)
-20. [Operations and Troubleshooting](#operations-and-troubleshooting)
-21. [How to Modify the System Safely](#how-to-modify-the-system-safely)
-22. [Production Readiness Checklist](#production-readiness-checklist)
+16. [Pricing Engine Module](#pricing-engine-module)
+17. [Event-Aware Forecasting Module](#event-aware-forecasting-module)
+18. [Vision / OCR Invoice Processing Module](#vision--ocr-invoice-processing-module)
+19. [Security & Performance Hardening](#security--performance-hardening)
+20. [Configuration and Environment Variables](#configuration-and-environment-variables)
+21. [Running the System](#running-the-system)
+22. [Testing Strategy](#testing-strategy)
+23. [CI/CD](#cicd)
+24. [Operations and Troubleshooting](#operations-and-troubleshooting)
+25. [How to Modify the System Safely](#how-to-modify-the-system-safely)
+26. [Production Readiness Checklist](#production-readiness-checklist)
 
 ---
 
@@ -59,6 +67,7 @@ RetailIQ is built as a Flask app using SQLAlchemy models and blueprint modules. 
 - **GST Compliance**: HSN code management, GSTIN validation (modulo-36 checksum), per-transaction CGST/SGST recording, GSTR-1 JSON generation, and liability slab analytics.
 - **WhatsApp Integration**: Outbound messaging (Alerts & Purchase Orders) via Meta Cloud API, secure Fernet token encryption at rest, and Meta webhook verification/handling.
 - **Chain Ownership**: Multi-store grouping, chain-wide KPI dashboards, store comparison matrix with relative coding, and automated inter-store transfer suggestions.
+- **Pricing Engine**: Competitive price drift detection via price elasticity proxy, margin-optimized RAISE/LOWER suggestions, configurable pricing rules, and weekly automated analysis.
 
 ---
 
@@ -116,9 +125,11 @@ app/
   gst/                       # GST config, HSN master, GSTIN validator, GSTR-1 generation
   whatsapp/                  # Meta API client, message logs, secure config, templates
   chain/                     # store groups, chain dashboard, compare, transfers
-    __init__.py              # Blueprint definition
-    routes.py                # 7 REST endpoints (barcodes + receipts)
-    formatter.py             # build_receipt_payload() — pure dict builder
+  pricing/                   # pricing engine, suggestion API, rules, price history
+  events/                    # business event calendar, demand sensing endpoint
+  vision/                    # OCR invoice processing, parser, upload/confirm API
+  utils/
+    sanitize.py              # Input sanitization (strip + truncate) utility
 
 migrations/
   env.py                     # Alembic environment (reads DATABASE_URL)
@@ -194,6 +205,11 @@ tests/
 - `credit_transactions`: Credit ledger entries with `type` CHECK(`CREDIT_SALE`, `REPAYMENT`, `ADJUSTMENT`).
 - `transactions.session_id`: Updated nullable attribution FK indexing transactions to sessions.
 
+### Pricing entities (migration `c3d91f2a7b44`)
+- `product_price_history`: Enhanced with `store_id`, `old_price`, `new_price`, `reason`, `changed_by` — tracks every price change with full audit trail.
+- `pricing_suggestions`: Engine-generated suggestions — `suggested_price`, `current_price`, `price_change_pct`, `reason`, `confidence`, `status` CHECK(`PENDING`/`APPLIED`/`DISMISSED`), `actioned_at`.
+- `pricing_rules`: Per-store configurable rules — `rule_type`, `parameters` (JSONB), `is_active`.
+
 ### Circular FK note (`users` ↔ `stores`)
 The schema intentionally has a circular relationship:
 - `stores.owner_user_id -> users.user_id`
@@ -219,6 +235,7 @@ Canonical tasks live in `app/tasks/tasks.py`.
 - `build_analytics_snapshot` / `build_all_analytics_snapshots` (Offline analytics payload generation)
 - `expire_loyalty_points` (Monthly on 1st: expire points from accounts inactive beyond `expiry_days`)
 - `credit_overdue_alerts` (Daily: create HIGH-priority alerts for credit balances unpaid >30 days)
+- `run_weekly_pricing_analysis` (Sunday 03:00: runs pricing engine for all stores, upserts PENDING suggestions, skips duplicates within 7 days)
 
 ### Task Reliability Patterns
 - Redis lock keys to avoid duplicate concurrent runs.
@@ -455,6 +472,36 @@ Blueprint registered under `/api/v1/chain`. Requires `chain_role: CHAIN_OWNER` i
 
 ---
 
+## Pricing Engine Module
+
+Blueprint registered under `/api/v1/pricing`.
+
+### Pricing Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/v1/pricing/suggestions` | ✅ | List PENDING suggestions for the store with margin impact analysis |
+| `POST` | `/api/v1/pricing/suggestions/<id>/apply` | ✅ | Apply suggestion: updates `products.selling_price`, records `product_price_history`, marks APPLIED. Returns 409 if already actioned |
+| `POST` | `/api/v1/pricing/suggestions/<id>/dismiss` | ✅ | Dismiss suggestion. Returns 409 if already actioned |
+| `GET` | `/api/v1/pricing/history?product_id=<id>` | ✅ | Price change history for a product (last 100 entries) |
+| `GET` | `/api/v1/pricing/rules` | ✅ | List store pricing rules |
+| `PUT` | `/api/v1/pricing/rules` | ✅ | Upsert a pricing rule by `rule_type` |
+
+### Engine Algorithm (`app/pricing/engine.py`)
+
+The `generate_price_suggestions(store_id, session)` function:
+1. **Qualifies products** with ≥30 days of `daily_sku_summary` history in the 90-day window.
+2. **Computes price elasticity proxy**: Pearson correlation between binary "price above median" flags and `units_sold`. Undetermined correlation (constant demand) defaults to 0.0 (perfectly inelastic).
+3. **Calculates margin**: `(selling_price - cost_price) / selling_price`.
+4. **RAISE trigger**: `margin < 15%` AND `elasticity_proxy > -0.3` → suggests +5% price increase.
+5. **LOWER trigger**: zero sales in 14 days AND `margin > 30%` AND no store-wide anomaly → suggests -10% price decrease.
+6. **Anomaly guard**: If the entire store had zero revenue in the lookback window, zero-velocity is attributed to a store-wide issue rather than a product problem.
+
+### Celery Task
+- **`run_weekly_pricing_analysis`** (Sunday 03:00): Iterates all stores, calls the pricing engine, and upserts PENDING suggestions. Skips if a PENDING suggestion for the same product already exists within 7 days (idempotency).
+
+---
+
 ## Configuration and Environment Variables
 Create `.env` for local overrides; in Docker, defaults from `.env.example` are loaded.
 
@@ -523,20 +570,57 @@ pytest -q
 ```bash
 pytest -q
 pytest -q tests/test_transactions.py tests/test_audit.py tests/test_auth_flow.py
+pytest tests/test_security.py -v   # security hardening tests
+pytest tests/test_e2e.py -v        # end-to-end integration tests
 ```
+
+### Security Tests (`tests/test_security.py`)
+- **`test_login_rate_limit`**: Verifies 429 on 11th login attempt within a minute (uses separate app fixture with rate limiting enabled).
+- **`test_store_scoping_on_all_new_endpoints`**: Creates two stores and verifies that a JWT from store B cannot access store A's data across all post-launch blueprints.
+- **`test_sensitive_fields_not_in_logs`**: PUTs a WhatsApp config with an `access_token` and verifies the raw token is redacted from captured log output.
+
+### E2E Integration Tests (`tests/test_e2e.py`)
+Multi-step user journey tests that span multiple endpoints and simulate Celery tasks inline:
+- **`test_full_retail_day`**: Create 3 products → record 5 sales (CASH/UPI) → rebuild aggregates → verify dashboard revenue → evaluate alerts → verify LOW_STOCK on depleted product.
+- **`test_supplier_po_stock_cycle`**: Create supplier → link product → create/send PO → receive goods → verify stock increased, PO FULFILLED, GRN created.
+- **`test_loyalty_full_cycle`**: Setup 1pt/₹ loyalty → create customer → ₹200 sale → assert 200 pts earned → redeem 100 → assert balance 100 → over-redeem 200 → 422.
+- **`test_gst_month_compilation`**: Enable GST → seed HSN codes (5%/18%) → 10 transactions → compile GST filing → verify summary totals and liability slabs sum correctly.
+- **`test_offline_snapshot_freshness`**: Seed 30 days of aggregates → build snapshot → verify `built_at` <60s old and `revenue_30d` populated.
+- **`test_chain_cross_store_isolation`**: Create stores A and B → supplier in A → A's JWT sees it → B's JWT does NOT.
 
 ---
 
 ## CI/CD
 
-GitHub Actions workflow `.github/workflows/test-on-commit.yml`:
-- triggers on push + pull request,
-- installs dependencies,
-- runs `pytest -v`.
+### CI Pipeline (`.github/workflows/ci.yml`)
 
-Recommended branch protection:
-- require passing CI before merge,
-- disallow direct pushes to default branch.
+Runs on every push and PR. Six parallel jobs:
+
+| Job | Purpose | Blocking? |
+|-----|---------|-----------|
+| 🔍 **Lint** | Ruff linter + format check | ✅ Yes |
+| 🛡️ **Security** | Bandit SAST scan + `pip-audit` CVE check | ⚠️ Advisory |
+| 🧪 **Test** | Full pytest suite (matrix: 3.10 + 3.11) with coverage | ✅ Yes |
+| 🐳 **Docker** | Validate `Dockerfile.prod` builds | ✅ Yes |
+| 📦 **Migration Check** | Detect un-generated Alembic migrations | ✅ Yes |
+| ✅ **CI Pass** | Status gate for branch protection rules | ✅ Required |
+
+Features:
+- **Concurrency control**: duplicate CI runs on the same branch are cancelled.
+- **Coverage threshold**: fails if line coverage drops below 40%.
+- **Artifact uploads**: test results (JUnit XML), coverage reports, Bandit JSON.
+
+### Deploy Pipeline (`.github/workflows/deploy.yml`)
+
+Triggers on push to `main` or manual dispatch:
+1. **Test** → full pytest gate (skippable for emergency hotfixes).
+2. **Build & Push** → multi-stage Docker build with Buildx layer caching → ECR.
+3. **Deploy** → sequential rolling update: API → Worker → Beat (ECS Fargate).
+4. **Verify** → deployment summary + optional Slack notifications.
+
+Branch protection recommended:
+- require **CI Pass** check before merge,
+- disallow direct pushes to `main`.
 
 ---
 
@@ -545,14 +629,39 @@ Recommended branch protection:
 ## Health endpoint
 - `GET /api/v1/health` returns app-level status payload.
 
+## Environment Validation
+
+The app loads `.env` via `python-dotenv` at startup (before any `os.environ` reads). In **production** mode (`FLASK_ENV=production`), the app **refuses to start** if:
+
+- `SECRET_KEY` is missing or set to a known weak default
+- `DATABASE_URL` is missing or uses default dev credentials (`retailiq:retailiq`)
+- `REDIS_URL` or `CELERY_BROKER_URL` is missing
+- `JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` are missing
+
+In **development** mode, missing values use sensible defaults with a warning.
+
+A startup banner logs the active configuration (with masked DB passwords) on boot:
+```
+  ┌─────────────────────────────────────────────┐
+  │  RetailIQ starting                          │
+  │  ENV:      production                       │
+  │  DB:       postgresql://retailiq:***@db...   │
+  │  JWT keys: from env                         │
+  │  .env:     loaded                           │
+  └─────────────────────────────────────────────┘
+```
+
 ## Common startup issues
-1. **DB unavailable**
+1. **"STARTUP ABORTED — Missing or invalid configuration"**
+   - Copy `.env.example` to `.env` and fill in production values.
+   - Run `cp .env.example .env` and edit the file.
+2. **DB unavailable**
    - check Postgres container health.
    - inspect logs for `wait_for_db.py` timeout.
-2. **Migration failure**
+3. **Migration failure**
    - run `alembic upgrade head` manually.
    - verify `DATABASE_URL` points to expected DB.
-3. **Redis broker errors**
+4. **Redis broker errors**
    - confirm `REDIS_URL` / `CELERY_BROKER_URL`.
    - verify Redis service up.
 
@@ -601,14 +710,150 @@ Before deployment, ensure all are true:
 - [ ] secrets managed externally (no plaintext secrets in repo).
 - [ ] stable JWT key management strategy in place.
 - [ ] log aggregation and monitoring configured.
+- [x] rate limits applied on auth and all endpoints.
+- [x] sensitive data log filter in place.
 - [ ] backup/restore validated for PostgreSQL.
-- [ ] rate limits and auth policies reviewed.
+- [x] rate limits and auth policies reviewed.
 - [ ] worker + beat autoscaling and queue policies defined.
 - [ ] rollback strategy documented.
 
 ---
 
+## Event-Aware Forecasting Module
+
+The event-aware forecasting engine extends Prophet with a **business event calendar** so that upcoming holidays, promotions, and closures influence demand predictions as external regressors.
+
+### Architecture
+
+```
+GET /events                 →  list / filter events
+POST /events                →  create event
+PUT  /events/{id}           →  update event
+DELETE /events/{id}         →  delete event
+GET /events/upcoming?days=N →  next N days of events
+GET /forecasting/demand-sensing/{product_id}
+                            →  run event-adjusted forecast (14-day), log to demand_sensing_log
+```
+
+### How It Works
+
+1. **Event Registry** — `BusinessEvent` stores events with `start_date`, `end_date`, `event_type` (`HOLIDAY | FESTIVAL | PROMOTION | SALE_DAY | CLOSURE`), and optional `expected_impact_pct`.
+2. **Regressor Injection** — `generate_demand_forecast` fetches up to 5 events (highest absolute `expected_impact_pct`) that overlap the history + horizon window. Binary regressor columns (`event_<id8>`: `1.0` on event days, `0.0` otherwise) are injected into the Prophet DataFrame via `m.add_regressor()`.
+3. **Base vs Adjusted** — After Prophet prediction, `extra_regressors_additive` from the forecast is subtracted to yield `base_forecast`. Both are stored per-day.
+4. **Demand Sensing Log** — Each run writes to `demand_sensing_log` with `base_forecast`, `event_adjusted_forecast`, and the active events list as JSONB.
+5. **Fallback Safety** — If the history is below `MIN_DAYS_PROPHET` (35 days), the Ridge regression fallback is used and events are still recorded in the log (as active events metadata) but not applied as regressors.
+
+### Data Models
+
+| Table | Purpose |
+|---|---|
+| `business_events` | Event calendar per store |
+| `demand_sensing_log` | Per-day forecast snapshots with active events |
+| `event_impact_actuals` | Post-hoc measured impact of events on demand |
+
+### Regressor Cap
+
+To prevent Prophet from overfitting on sparse event data, a maximum of **5 regressors** are added per forecast run, chosen by highest absolute `|expected_impact_pct|`. Events with `NULL` impact are assigned a default behavioural `prior_scale=10.0`.
+
+### Migration
+
+Migration file: `migrations/versions/e7b8c9d0a1f2_events_tables.py`  
+Alembic chain: `chain_integration (64289450c79b)` → `pricing_tables (c3d91f2a7b44)` → **`events_tables (e7b8c9d0a1f2)`** (HEAD)
+
+---
+## Vision / OCR Invoice Processing Module
+
+The Vision module lets store owners photograph supplier invoices and have Tesseract OCR extract line items automatically. Extracted entries are fuzzy-matched against the product catalogue using PostgreSQL `pg_trgm`, then presented for human review before stock is atomically updated.
+
+### Architecture
+
+```
+Upload Image ──▶ POST /vision/ocr/upload
+                 │  saves file to uploads/ocr/{store_id}/
+                 │  creates OcrJob (status=QUEUED)
+                 └─▶ Celery task: process_ocr_job
+                      │ pytesseract → raw text
+                      │ parse_invoice_text() → structured items
+                      │ pg_trgm similarity match → products
+                      └─▶ OcrJobItems created, job → REVIEW
+
+Review ──────────▶ GET  /vision/ocr/{job_id}           (poll status + items)
+Confirm ─────────▶ POST /vision/ocr/{job_id}/confirm   (atomic stock update)
+Dismiss ─────────▶ POST /vision/ocr/{job_id}/dismiss   (mark as FAILED)
+```
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/vision/ocr/upload` | Upload invoice image (`.jpg/.png/.jpeg`, ≤10 MB). Returns `job_id`. |
+| `GET`  | `/api/v1/vision/ocr/{job_id}` | Poll job status and extracted items with match confidence. |
+| `POST` | `/api/v1/vision/ocr/{job_id}/confirm` | Confirm items → atomic stock increase + `StockAdjustment` log. |
+| `POST` | `/api/v1/vision/ocr/{job_id}/dismiss` | Dismiss/reject the OCR result. |
+
+### Data Model (migration `31f7ac7d8d9a`)
+
+| Table | Purpose |
+|-------|---------|
+| `ocr_jobs` | Tracks each upload: image path, status (`QUEUED→PROCESSING→REVIEW→APPLIED\|FAILED`), raw OCR text. |
+| `ocr_job_items` | Individual line items: raw text, matched `product_id`, confidence, quantity, unit price. |
+| `vision_category_tags` | Category tags extracted from the invoice with confidence scores. |
+
+### Parser (`app/vision/parser.py`)
+
+Regex-based text parser handles: quantities with units (`pcs`, `kg`, `litre`, `pack`, `box`, `carton`, `dozen`), prices with `₹`/`Rs`/`Rs.` prefixes, comma-separated numbers, and multi-line product names.
+
+### Testing (10 tests in `tests/test_vision.py`)
+
+- **Parser**: basic extraction, comma prices, case-insensitive units, multi-line accumulation
+- **Upload API**: valid image → 201, oversized → 413, wrong MIME → 415
+- **OCR task**: simulated task creates items and transitions job to REVIEW
+- **Confirm**: atomic stock update verified; partial failure rolls back all changes
+
+### Security
+
+All endpoints require JWT auth (`@require_auth`). Job ownership is enforced via `store_id` comparison. OCR uploads are rate-limited to 20/hour per store.
+
+---
+
+## Security & Performance Hardening
+
+The hardening pass adds cross-cutting security and performance controls without new features.
+
+### Rate Limiting
+
+| Endpoint | Limit | Key |
+|----------|-------|-----|
+| `POST /auth/register` | 5/hour | IP |
+| `POST /auth/login` | 10/minute | IP |
+| `POST /vision/ocr/upload` | 20/hour | `store_id` (from JWT) |
+| All other endpoints | 300/minute | IP (global default) |
+
+Powered by `flask-limiter` with Redis storage. Rate limiting is disabled in tests (`RATELIMIT_ENABLED=False`) except for the dedicated `test_login_rate_limit` test which uses a separate app fixture.
+
+### FK Index Audit (migration `f4a5b6c7d8e9`)
+
+35 indexes added to FK columns across all post-launch tables: `supplier_products`, `purchase_order_items`, `gst_transactions`, `loyalty_transactions`, `credit_transactions`, `ocr_job_items`, `ocr_jobs`, `vision_category_tags`, `whatsapp_templates`, `whatsapp_message_log`, `store_group_memberships`, `chain_daily_aggregates`, `inter_store_transfer_suggestions`, `business_events`, `demand_sensing_log`, `event_impact_actuals`, `stock_adjustments`, `stock_audit_items`, `product_price_history`, and more.
+
+### Input Sanitization
+
+- **OCR text truncation**: `parse_invoice_text()` truncates input to 50,000 characters to prevent DoS from huge payloads.
+- **Free-text fields**: `app/utils/sanitize.py` provides `sanitize_string(value, max_length)` which strips leading/trailing whitespace and truncates. Applied on supplier create/update (name 128, address 512) and PO notes.
+
+### Log Redaction (`SensitiveDataFilter`)
+
+A `logging.Filter` attached to the Flask app logger and the root logger redacts values matching `token`, `password`, `access_token`, or `secret` patterns with `***REDACTED***`. This prevents API keys and passwords from appearing in log files.
+
+### Slow Request Detection
+
+In development mode (`FLASK_ENV=development` and not `TESTING`):
+- `SQLALCHEMY_ECHO=True` logs all SQL queries.
+- An `@app.after_request` hook logs `[SLOW REQUEST] {method} {path} took {time}ms` for any response taking >500ms.
+
+---
+
 ## Contributing
+
 
 1. Create a branch.
 2. Implement code + tests.

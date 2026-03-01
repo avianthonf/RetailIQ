@@ -6,13 +6,7 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env.example
-    environment:
-      - FLASK_APP=wsgi.py
-      - FLASK_ENV=development
-      - DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - REDIS_URL=redis://redis:6379/0
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,16 +19,14 @@ services:
 
   postgres:
     image: postgres:15
-    environment:
-      POSTGRES_USER: retailiq
-      POSTGRES_PASSWORD: retailiq
-      POSTGRES_DB: retailiq
+    env_file:
+      - .env
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U retailiq -d retailiq"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-retailiq} -d ${POSTGRES_DB:-retailiq}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -49,11 +41,7 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env.example
-    environment:
-      - DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - REDIS_URL=redis://redis:6379/0
+      - .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,11 +54,7 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env.example
-    environment:
-      - DATABASE_URL=postgresql://retailiq:retailiq@postgres:5432/retailiq
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - REDIS_URL=redis://redis:6379/0
+      - .env
     depends_on:
       postgres:
         condition: service_healthy

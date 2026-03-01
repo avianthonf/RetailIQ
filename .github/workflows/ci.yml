@@ -1,0 +1,290 @@
+# ============================================================================
+# RetailIQ — Continuous Integration
+# ============================================================================
+# Runs on every push and PR. Five parallel jobs:
+#   1. lint       — Ruff (fast Python linter/formatter check)
+#   2. security   — Bandit SAST scan + pip-audit for known CVEs
+#   3. test       — Full pytest suite with Postgres + Redis services
+#   4. coverage   — Upload coverage report as PR comment artifact
+#   5. docker     — Validate the production Docker image builds
+#
+# The test job uses an in-memory SQLite (via conftest.py), so the Postgres
+# service is available but not strictly required for most tests.
+# ============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write      # needed for coverage PR comment
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared env for test/coverage jobs
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  PYTHON_VERSION: '3.10'
+  DATABASE_URL: postgresql://retailiq:retailiq@localhost:5432/retailiq_test
+  CELERY_BROKER_URL: redis://localhost:6379/1
+  REDIS_URL: redis://localhost:6379/0
+  SECRET_KEY: ci-test-secret-key-do-not-use-in-production
+  FLASK_ENV: development
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. LINT — fast feedback (<30s)
+  # ──────────────────────────────────────────────────────────────────────────
+  lint:
+    name: 🔍 Lint (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Ruff
+        run: pip install ruff==0.4.4
+
+      - name: Ruff check (lint)
+        run: ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check .
+        continue-on-error: true   # advisory, don't block PRs yet
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. SECURITY — SAST + dependency audit
+  # ──────────────────────────────────────────────────────────────────────────
+  security:
+    name: 🛡️ Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install scanner tools
+        run: pip install bandit==1.7.8 pip-audit==2.7.3
+
+      - name: Bandit SAST scan
+        run: |
+          bandit -r app/ \
+            -s B101,B601 \
+            -f json -o bandit-report.json \
+            --exit-zero
+          # Print human-readable summary
+          bandit -r app/ -s B101,B601 -ll || true
+
+      - name: pip-audit (known CVEs)
+        run: pip-audit -r requirements.txt --desc || true
+        continue-on-error: true   # advisory — don't block if a dep has no fix yet
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. TEST — full pytest suite
+  # ──────────────────────────────────────────────────────────────────────────
+  test:
+    name: 🧪 Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11']
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: retailiq
+          POSTGRES_PASSWORD: retailiq
+          POSTGRES_DB: retailiq_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U retailiq"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run Alembic migrations
+        run: alembic upgrade head
+
+      - name: Run test suite with coverage
+        run: |
+          pytest tests/ \
+            -v \
+            --tb=short \
+            --strict-markers \
+            --cov=app \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --junitxml=results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-py${{ matrix.python-version }}
+          path: |
+            results.xml
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+      - name: Fail if coverage below threshold
+        if: matrix.python-version == '3.10'
+        run: |
+          python -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          rate = float(tree.getroot().attrib['line-rate'])
+          pct = round(rate * 100, 1)
+          print(f'Coverage: {pct}%')
+          if pct < 40:
+              raise SystemExit(f'Coverage {pct}% is below 40% minimum')
+          "
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. DOCKER BUILD — validate production image compiles
+  # ──────────────────────────────────────────────────────────────────────────
+  docker:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.prod
+          push: false
+          tags: retailiq:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. MIGRATION CHECK — ensure no un-generated migrations
+  # ──────────────────────────────────────────────────────────────────────────
+  migration-check:
+    name: 📦 Migration Check
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: retailiq
+          POSTGRES_PASSWORD: retailiq
+          POSTGRES_DB: retailiq_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U retailiq"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply all migrations
+        run: alembic upgrade head
+
+      - name: Check for un-generated migrations
+        run: |
+          OUTPUT=$(alembic check 2>&1) || true
+          if echo "$OUTPUT" | grep -q "New upgrade operations detected"; then
+            echo "::error::Model changes detected without a migration. Run 'alembic revision --autogenerate'."
+            exit 1
+          fi
+          echo "✅ No un-generated migrations."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. STATUS GATE — single required check for branch protection
+  # ──────────────────────────────────────────────────────────────────────────
+  ci-pass:
+    name: ✅ CI Pass
+    if: always()
+    needs: [lint, security, test, docker, migration-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        run: |
+          echo "lint:            ${{ needs.lint.result }}"
+          echo "security:        ${{ needs.security.result }}"
+          echo "test:            ${{ needs.test.result }}"
+          echo "docker:          ${{ needs.docker.result }}"
+          echo "migration-check: ${{ needs.migration-check.result }}"
+
+          # Fail if any required job failed
+          if [[ "${{ needs.lint.result }}" == "failure" ]]; then exit 1; fi
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then exit 1; fi
+          if [[ "${{ needs.docker.result }}" == "failure" ]]; then exit 1; fi
+          if [[ "${{ needs.migration-check.result }}" == "failure" ]]; then exit 1; fi
+
+          # Security is advisory — warn but don't fail
+          if [[ "${{ needs.security.result }}" == "failure" ]]; then
+            echo "::warning::Security scan had failures (advisory)"
+          fi
+
+          echo "🎉 All required CI checks passed."
