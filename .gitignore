@@ -50,3 +50,11 @@ htmlcov/
 
 # Docker overrides
 docker-compose.override.yml
+
+# Runtime user-uploaded files (OCR invoices, etc.) — never commit
+uploads/
+
+# Scratch / debug files
+*.patch
+diff.patch
+status.txt

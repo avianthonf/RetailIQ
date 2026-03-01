@@ -129,7 +129,9 @@ def analytics():
     """
     store_id = g.current_user['store_id']
     now      = datetime.now(timezone.utc)
-    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    # Use naive UTC month_start so datetime comparisons work for both
+    # SQLite (tests, stores naive datetimes) and PostgreSQL (production).
+    month_start = datetime(now.year, now.month, 1)  # naive UTC
 
     # ── customers who made at least one purchase this month ──────────────────
     month_buyers_sq = (

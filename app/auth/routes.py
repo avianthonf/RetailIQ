@@ -16,6 +16,7 @@ from .. import db, limiter
 from ..models import User, Store
 
 @auth_bp.route('/register', methods=['POST'])
+@limiter.limit("5/hour")
 def register():
     try:
         data = RegisterSchema().load(request.json)
@@ -83,7 +84,7 @@ def verify_otp_endpoint():
     return format_response(False, error={"code": "INVALID_OTP", "message": "Invalid or expired OTP."}), 400
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit("5 per 15 minute", key_func=lambda: request.json.get('mobile_number', '') if request.json else '')
+@limiter.limit("10/minute")
 def login():
     try:
         data = LoginSchema().load(request.json)

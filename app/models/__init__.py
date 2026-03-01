@@ -95,10 +95,56 @@ class ProductPriceHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     product_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('products.product_id'))
-    cost_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-    selling_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
-    changed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
-    changed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('users.user_id'))
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=True)
+    old_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    new_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    # Legacy fields kept for backward compat
+    cost_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    selling_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    changed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    changed_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=True)
+
+
+class PricingSuggestion(Base):
+    __tablename__ = 'pricing_suggestions'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey('products.product_id'), nullable=False)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    suggested_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    current_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    price_change_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 2))
+    reason: Mapped[Optional[str]] = mapped_column(String(256))
+    confidence: Mapped[Optional[str]] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(
+        String(16),
+        CheckConstraint("status IN ('PENDING','APPLIED','DISMISSED')", name='chk_pricing_suggestion_status'),
+        server_default='PENDING',
+        default='PENDING',
+    )
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    actioned_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, nullable=True)
+
+    __table_args__ = (
+        Index('idx_pricing_suggestions_store_status', 'store_id', 'status'),
+        Index('idx_pricing_suggestions_product_created', 'product_id', 'created_at'),
+    )
+
+
+class PricingRule(Base):
+    __tablename__ = 'pricing_rules'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
+    rule_type: Mapped[Optional[str]] = mapped_column(String(32))
+    parameters: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index('idx_pricing_rules_store_active', 'store_id', 'is_active'),
+    )
 
 class Customer(Base):
     __tablename__ = 'customers'
@@ -624,3 +670,91 @@ class InterStoreTransferSuggestion(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), server_default='PENDING', default='PENDING')
     created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+
+# ── Events Models ─────────────────────────────────────────────────────────────
+
+
+class BusinessEvent(Base):
+    __tablename__ = 'business_events'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    event_name: Mapped[Optional[str]] = mapped_column(String(128))
+    event_type: Mapped[Optional[str]] = mapped_column(
+        String(32),
+        CheckConstraint("event_type IN ('HOLIDAY', 'FESTIVAL', 'PROMOTION', 'SALE_DAY', 'CLOSURE')")
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    expected_impact_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 2))
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    recurrence_rule: Mapped[Optional[str]] = mapped_column(String(128))
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+class DemandSensingLog(Base):
+    __tablename__ = 'demand_sensing_log'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    product_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('products.product_id'))
+    date: Mapped[date] = mapped_column(Date, nullable=True)
+    actual_demand: Mapped[Optional[float]] = mapped_column(Numeric(12, 3))
+    base_forecast: Mapped[Optional[float]] = mapped_column(Numeric(12, 3))
+    event_adjusted_forecast: Mapped[Optional[float]] = mapped_column(Numeric(12, 3))
+    active_events: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+class EventImpactActuals(Base):
+    __tablename__ = 'event_impact_actuals'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('business_events.id'))
+    product_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('products.product_id'))
+    actual_impact_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 2))
+    measured_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+# ── Vision / OCR Models ───────────────────────────────────────────────────────
+
+class OcrJob(Base):
+    __tablename__ = 'ocr_jobs'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('stores.store_id'))
+    image_path: Mapped[Optional[str]] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(
+        String(16), 
+        CheckConstraint("status IN ('QUEUED', 'PROCESSING', 'REVIEW', 'APPLIED', 'FAILED')"),
+        default='QUEUED'
+    )
+    raw_ocr_text: Mapped[Optional[str]] = mapped_column(Text)
+    extracted_items: Mapped[Optional[dict]] = mapped_column(JSONB)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+
+
+class OcrJobItem(Base):
+    __tablename__ = 'ocr_job_items'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('ocr_jobs.id'))
+    raw_text: Mapped[Optional[str]] = mapped_column(String(256))
+    matched_product_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('products.product_id'))
+    confidence: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))
+    quantity: Mapped[Optional[float]] = mapped_column(Numeric(12, 3))
+    unit_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class VisionCategoryTag(Base):
+    __tablename__ = 'vision_category_tags'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey('ocr_jobs.id'))
+    tag: Mapped[Optional[str]] = mapped_column(String(64))
+    confidence: Mapped[Optional[float]] = mapped_column(Numeric(5, 2))

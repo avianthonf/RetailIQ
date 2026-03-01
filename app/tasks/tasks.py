@@ -1127,3 +1127,208 @@ def detect_transfer_opportunities(self, group_id_str):
                 })
 
             session.commit()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PRICING ANALYSIS TASK
+# ──────────────────────────────────────────────────────────────────────────────
+
+@shared_task(bind=True, name='tasks.run_weekly_pricing_analysis', max_retries=3,
+             default_retry_delay=120, autoretry_for=(Exception,), retry_backoff=True)
+def run_weekly_pricing_analysis(self):
+    """
+    Weekly (Sunday 03:00): generate pricing suggestions for all stores.
+    Upserts suggestions; skips if a PENDING suggestion for the same product
+    was already created within the last 7 days.
+    """
+    import uuid as _uuid
+    lock_key = f"lock:pricing_analysis:{date_type.today()}"
+    with _RedisLock(lock_key, ttl=3600) as acquired:
+        if not acquired:
+            _log('run_weekly_pricing_analysis', status='skipped_lock_held')
+            return
+
+        _log('run_weekly_pricing_analysis', status='start')
+
+        from app.pricing.engine import generate_price_suggestions
+
+        cutoff_7d = date_type.today() - timedelta(days=7)
+
+        with task_session() as session:
+            dialect = session.get_bind().dialect.name
+            stores = session.execute(text("SELECT store_id FROM stores")).fetchall()
+            total_inserted = 0
+
+            for store_row in stores:
+                sid = store_row.store_id
+                try:
+                    suggestions = generate_price_suggestions(sid, session)
+                except Exception as exc:
+                    _log('run_weekly_pricing_analysis', store_id=sid,
+                         status='engine_error', error=str(exc))
+                    continue
+
+                for sg in suggestions:
+                    pid = sg['product_id']
+
+                    # Check for recent PENDING suggestion for same product
+                    if dialect == 'sqlite':
+                        recent = session.execute(text("""
+                            SELECT id FROM pricing_suggestions
+                            WHERE store_id   = :sid
+                              AND product_id = :pid
+                              AND status     = 'PENDING'
+                              AND created_at >= :cutoff
+                            LIMIT 1
+                        """), {
+                            "sid": sid, "pid": pid,
+                            "cutoff": str(cutoff_7d),
+                        }).fetchone()
+                    else:
+                        recent = session.execute(text("""
+                            SELECT id FROM pricing_suggestions
+                            WHERE store_id   = :sid
+                              AND product_id = :pid
+                              AND status     = 'PENDING'
+                              AND created_at >= :cutoff
+                            LIMIT 1
+                        """), {
+                            "sid": sid, "pid": pid,
+                            "cutoff": str(cutoff_7d),
+                        }).fetchone()
+
+                    if recent:
+                        continue  # skip – recent suggestion already exists
+
+                    current  = float(sg['current_price'])
+                    proposed = float(sg['suggested_price'])
+                    change_pct = round((proposed - current) / current * 100, 2) if current else 0
+
+                    session.execute(text("""
+                        INSERT INTO pricing_suggestions
+                            (product_id, store_id, suggested_price, current_price,
+                             price_change_pct, reason, confidence, status, created_at)
+                        VALUES
+                            (:pid, :sid, :suggested, :current,
+                             :pct, :reason, :confidence, 'PENDING', CURRENT_TIMESTAMP)
+                    """), {
+                        "pid": pid,
+                        "sid": sid,
+                        "suggested": proposed,
+                        "current": current,
+                        "pct": change_pct,
+                        "reason": sg['reason'][:256],
+                        "confidence": sg['confidence'][:16],
+                    })
+                    total_inserted += 1
+
+            _log('run_weekly_pricing_analysis', status='done',
+                 stores=len(stores), suggestions_inserted=total_inserted)
+
+
+@shared_task(bind=True, max_retries=1)
+def process_ocr_job(self, job_id: str):
+    """
+    Process an uploaded invoice image via OCR.
+    Extract items, match products via pg_trgm, and transition job to REVIEW.
+    """
+    import pytesseract
+    from PIL import Image
+    import uuid
+    from app.vision.parser import parse_invoice_text
+    
+    _log('process_ocr_job', job_id=job_id, status='started')
+    
+    with task_session() as session:
+        # Load job
+        job_row = session.execute(
+            text("SELECT * FROM ocr_jobs WHERE id = :jid FOR UPDATE"),
+            {"jid": job_id}
+        ).fetchone()
+        
+        if not job_row:
+            _log('process_ocr_job', job_id=job_id, error='Job not found')
+            return
+            
+        if job_row.status not in ('QUEUED',):
+            _log('process_ocr_job', job_id=job_id, error='Job not QUEUED')
+            return
+            
+        # Mark PROCESSING
+        session.execute(
+            text("UPDATE ocr_jobs SET status = 'PROCESSING' WHERE id = :jid"),
+            {"jid": job_id}
+        )
+        session.commit()
+        
+    # Execute OCR and processing safely
+    try:
+        image_path = job_row.image_path
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Image not found at {image_path}")
+            
+        img = Image.open(image_path)
+        raw_text = pytesseract.image_to_string(img, config='--psm 6')
+        
+        parsed_items = parse_invoice_text(raw_text)
+        
+        with task_session() as session:
+            # 1. Update job with raw_text
+            session.execute(
+                text("UPDATE ocr_jobs SET raw_ocr_text = :text WHERE id = :jid"),
+                {"text": raw_text, "jid": job_id}
+            )
+            
+            # 2. Match products and insert line items
+            for item in parsed_items:
+                product_name = item['product_name']
+                
+                # Try to fuzzy match
+                match = session.execute(
+                    text("""
+                        SELECT product_id, similarity(product_name, :search) as sim 
+                        FROM products 
+                        WHERE store_id = :sid AND similarity(product_name, :search) > 0.4 
+                        ORDER BY sim DESC LIMIT 1
+                    """),
+                    {"search": product_name, "sid": job_row.store_id}
+                ).fetchone()
+                
+                matched_id = match.product_id if match else None
+                confidence = float(match.sim) if match else 0.0
+                
+                item_id = str(uuid.uuid4())
+                session.execute(
+                    text("""
+                        INSERT INTO ocr_job_items 
+                        (id, job_id, raw_text, matched_product_id, confidence, quantity, unit_price, is_confirmed)
+                        VALUES (:id, :jid, :rtext, :mid, :conf, :qty, :price, FALSE)
+                    """),
+                    {
+                        "id": item_id,
+                        "jid": job_id,
+                        "rtext": item['raw_text'][:256],
+                        "mid": matched_id,
+                        "conf": confidence,
+                        "qty": item['quantity'],
+                        "price": item['unit_price']
+                    }
+                )
+                
+            # 3. Mark job REVIEW
+            session.execute(
+                text("UPDATE ocr_jobs SET status = 'REVIEW' WHERE id = :jid"),
+                {"jid": job_id}
+            )
+            session.commit()
+            
+        _log('process_ocr_job', job_id=job_id, status='completed', items=len(parsed_items))
+        
+    except Exception as e:
+        logger.exception("OCR job failed")
+        with task_session() as session:
+            session.execute(
+                text("UPDATE ocr_jobs SET status = 'FAILED', error_message = :err WHERE id = :jid"),
+                {"err": str(e), "jid": job_id}
+            )
+            session.commit()

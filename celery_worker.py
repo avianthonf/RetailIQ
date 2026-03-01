@@ -4,6 +4,7 @@ from app import create_app, celery_app
 
 # Important: load tasks so celery recognizes them
 from app.tasks import tasks
+from app.tasks.tasks import run_weekly_pricing_analysis  # noqa: F401
 
 app = create_app()
 app.app_context().push()
@@ -54,6 +55,10 @@ celery_app.conf.beat_schedule = {
     'chain_transfer_detection_weekly': {
         'task': 'tasks.detect_transfer_opportunities_all_groups',
         'schedule': crontab(day_of_week='monday', hour=5, minute=0),
+    },
+    'weekly_pricing_analysis': {
+        'task': 'tasks.run_weekly_pricing_analysis',
+        'schedule': crontab(day_of_week='sunday', hour=3, minute=0),
     },
 }
 

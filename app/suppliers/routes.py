@@ -12,6 +12,7 @@ from app.models import (
 from app.suppliers.analytics import (
     compute_supplier_fill_rate, compute_avg_lead_time, compute_price_change_pct
 )
+from app.utils.sanitize import sanitize_string
 
 suppliers_bp = Blueprint('suppliers', __name__)
 
@@ -71,11 +72,11 @@ def create_supplier():
         
     s = Supplier(
         store_id=sid,
-        name=body['name'],
-        contact_name=body.get('contact_name'),
+        name=sanitize_string(body['name'], 128),
+        contact_name=sanitize_string(body.get('contact_name'), 128),
         phone=body.get('phone'),
         email=body.get('email'),
-        address=body.get('address'),
+        address=sanitize_string(body.get('address'), 512),
         payment_terms_days=body.get('payment_terms_days', 30)
     )
     db.session.add(s)
@@ -154,11 +155,11 @@ def update_supplier(supplier_id):
         return jsonify(format_response(error='Supplier not found')), 404
         
     body = request.get_json() or {}
-    if 'name' in body: s.name = body['name']
-    if 'contact_name' in body: s.contact_name = body['contact_name']
+    if 'name' in body: s.name = sanitize_string(body['name'], 128)
+    if 'contact_name' in body: s.contact_name = sanitize_string(body['contact_name'], 128)
     if 'phone' in body: s.phone = body['phone']
     if 'email' in body: s.email = body['email']
-    if 'address' in body: s.address = body['address']
+    if 'address' in body: s.address = sanitize_string(body['address'], 512)
     if 'payment_terms_days' in body: s.payment_terms_days = body['payment_terms_days']
     if 'is_active' in body: s.is_active = body['is_active']
     
@@ -260,7 +261,7 @@ def create_purchase_order():
         supplier_id=supplier_id,
         status='DRAFT',
         expected_delivery_date=edd,
-        notes=body.get('notes'),
+        notes=sanitize_string(body.get('notes'), 500),
         created_by=uid
     )
     db.session.add(po)
