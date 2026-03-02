@@ -175,7 +175,7 @@ def analytics():
         func.count(distinct(Transaction.customer_id))
     ).filter(
         Transaction.store_id == store_id,
-        Transaction.is_return is False,
+        Transaction.is_return == False,
         Transaction.customer_id.isnot(None),
         Transaction.created_at >= month_start,
         Transaction.customer_id.in_(
