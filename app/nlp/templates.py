@@ -68,7 +68,7 @@ def format_currency(val: float) -> str:
     parts = s.split('.')
     integer_part = parts[0]
     decimal_part = parts[1]
-    
+
     integer_part = integer_part.replace(',', '')
     if len(integer_part) > 3:
         last_three = integer_part[-3:]

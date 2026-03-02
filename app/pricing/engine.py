@@ -25,14 +25,14 @@ RAISE_DELTA_PCT = 0.05         # suggest +5% price increase
 LOWER_DELTA_PCT = 0.10         # suggest -10% price decrease
 
 
-def _compute_pearson(xs: List[float], ys: List[float]) -> Optional[float]:
+def _compute_pearson(xs: list[float], ys: list[float]) -> float | None:
     """Returns Pearson correlation coefficient or None if undetermined."""
     n = len(xs)
     if n < 2:
         return None
     mean_x = statistics.mean(xs)
     mean_y = statistics.mean(ys)
-    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=False))
     denom_x = sum((x - mean_x) ** 2 for x in xs) ** 0.5
     denom_y = sum((y - mean_y) ** 2 for y in ys) ** 0.5
     if denom_x == 0 or denom_y == 0:
@@ -56,7 +56,7 @@ def _has_anomaly_in_14d(session, store_id: int, product_id: int) -> bool:
     return row and float(row.store_rev or 0) == 0
 
 
-def generate_price_suggestions(store_id: int, session) -> List[dict]:
+def generate_price_suggestions(store_id: int, session) -> list[dict]:
     """
     For each qualifying product (>= MIN_HISTORY_DAYS of SKU history):
       - Compute price_elasticity_proxy and margin_pct
@@ -67,7 +67,7 @@ def generate_price_suggestions(store_id: int, session) -> List[dict]:
       product_id, product_name, suggested_price, current_price,
       price_change_pct, reason, confidence, suggestion_type
     """
-    suggestions: List[dict] = []
+    suggestions: list[dict] = []
 
     cutoff_90 = datetime.now(timezone.utc).date() - timedelta(days=ELASTICITY_WINDOW_DAYS)
     cutoff_14 = datetime.now(timezone.utc).date() - timedelta(days=LOW_VELOCITY_DAYS)
@@ -126,7 +126,7 @@ def generate_price_suggestions(store_id: int, session) -> List[dict]:
             {"sid": store_id, "pid": product_id, "cutoff": str(cutoff_90)},
         ).fetchall()
 
-        elasticity_proxy: Optional[float] = None
+        elasticity_proxy: float | None = None
         if len(history) >= 2:
             prices = [float(r.avg_selling_price or selling_price) for r in history]
             units  = [float(r.units_sold or 0) for r in history]
@@ -159,7 +159,7 @@ def generate_price_suggestions(store_id: int, session) -> List[dict]:
         units_14d = float(vel_row.total_units) if vel_row else 0.0
 
         # ── Decision logic ────────────────────────────────────────────────────
-        suggestion: Optional[dict] = None
+        suggestion: dict | None = None
 
         # RAISE: low-margin AND inelastic demand
         if (

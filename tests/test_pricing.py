@@ -6,17 +6,21 @@ owner_headers, test_product, test_category).
 """
 import contextlib
 import json
-import pytest
-from datetime import datetime, date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
+
+import pytest
 
 from app import db
 from app.models import (
-    Product, DailySkuSummary, DailyStoreSummary, PricingSuggestion,
-    ProductPriceHistory, PricingRule,
+    DailySkuSummary,
+    DailyStoreSummary,
+    PricingRule,
+    PricingSuggestion,
+    Product,
+    ProductPriceHistory,
 )
 from app.pricing.engine import generate_price_suggestions
-
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helper: mock Redis lock & task_session so Celery tasks run in-process
@@ -334,7 +338,7 @@ def test_weekly_task_skips_recent_suggestion(app, test_store, test_category):
 
     # Pre-seed a PENDING suggestion from 3 days ago
     three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
-    existing = _make_pending_suggestion(
+    _make_pending_suggestion(
         test_store.store_id, product.product_id, created_at=three_days_ago
     )
 

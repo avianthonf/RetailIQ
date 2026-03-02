@@ -1,6 +1,8 @@
 import pytest
-from app.models import Store, Category, Product
+
 from app.database import db
+from app.models import Category, Product, Store
+
 
 def test_get_store_profile(client, owner_headers, test_store):
     response = client.get('/api/v1/store/profile', headers=owner_headers)
@@ -96,17 +98,17 @@ def test_update_tax_config(client, owner_headers, test_category, app):
         db.session.add(cat2)
         db.session.commit()
         cat2_id = cat2.category_id
-        
+
     payload = {
         "taxes": [
             {"category_id": test_category.category_id, "gst_rate": 18.0},
-            {"category_id": cat2_id, "gst_rate": 5.0} # this might be 0 randomly based on tests so map it explicitly 
+            {"category_id": cat2_id, "gst_rate": 5.0} # this might be 0 randomly based on tests so map it explicitly
         ]
     }
-    
+
     response = client.put('/api/v1/store/tax-config', headers=owner_headers, json=payload)
     assert response.status_code == 200
-    
+
     # Verify rates
     with app.app_context():
         cat1 = db.session.get(Category, test_category.category_id)

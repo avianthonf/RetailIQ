@@ -1,16 +1,18 @@
-import pytest
-from datetime import datetime, date, timezone
-from unittest.mock import patch
 import json
-
-from app.tasks.tasks import (
-    rebuild_daily_aggregates,
-    evaluate_alerts,
-    detect_slow_movers,
-)
-from app.models import Transaction, TransactionItem, Product, Alert, DailyStoreSummary
-from app import db
 import uuid
+from datetime import date, datetime, timezone
+from unittest.mock import patch
+
+import pytest
+
+from app import db
+from app.models import Alert, DailyStoreSummary, Product, Transaction, TransactionItem
+from app.tasks.tasks import (
+    detect_slow_movers,
+    evaluate_alerts,
+    rebuild_daily_aggregates,
+)
+
 
 # Mocks
 @pytest.fixture(autouse=True)
@@ -18,10 +20,10 @@ def mock_dependencies(monkeypatch):
     class MockRedisLock:
         def __init__(self, key, ttl=900):
             self.acquired = True
-            
+
         def __enter__(self):
             return self.acquired
-            
+
         def __exit__(self, *_):
             pass
     monkeypatch.setattr('app.tasks.tasks._RedisLock', MockRedisLock)
@@ -36,7 +38,7 @@ def mock_dependencies(monkeypatch):
         except Exception:
             db.session.rollback()
             raise
-    
+
     monkeypatch.setattr('app.tasks.tasks.task_session', mock_task_session)
 
 def _create_transaction(store_id, items, dt):
@@ -101,4 +103,4 @@ def test_rebuild_daily_aggregates_and_evaluate_alerts(app, test_store, test_prod
 
     # Test Slow Movers
     detect_slow_movers()
-    detect_slow_movers() # another call to verify idempotency 
+    detect_slow_movers() # another call to verify idempotency

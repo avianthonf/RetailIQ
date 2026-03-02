@@ -4,7 +4,7 @@ Receipt formatter — builds a structured receipt payload dict from a transactio
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from ..models import Transaction, TransactionItem, Product, ReceiptTemplate, Store
+from ..models import Product, ReceiptTemplate, Store, Transaction, TransactionItem
 
 
 def _to_float(val, default=0.0) -> float:

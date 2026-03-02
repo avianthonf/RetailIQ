@@ -8,12 +8,13 @@ We use StaticPool to force all SQLAlchemy connections (fixture sessions AND
 Flask request sessions) to share the exact same connection/DB instance.
 """
 import os
-import pytest
 
+import pytest
 from sqlalchemy import event
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.pool import StaticPool
+
 
 # ── make Postgres-specific types work on SQLite ─────────────────────────────
 @compiles(JSONB, "sqlite")
@@ -25,10 +26,10 @@ def _compile_uuid(type_, compiler, **kw):
     return "VARCHAR"
 # ────────────────────────────────────────────────────────────────────────────
 
-from app import create_app, db as _db
-from app.models import Base, User, Store, Category, Product
+from app import create_app
+from app import db as _db
 from app.auth.utils import generate_access_token
-
+from app.models import Base, Category, Product, Store, User
 
 # ---------------------------------------------------------------------------
 # App / DB fixtures
@@ -57,8 +58,8 @@ def app():
 
     with test_app.app_context():
         # Generate test RSA keys
-        from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
 
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         private_pem = private_key.private_bytes(
@@ -76,7 +77,7 @@ def app():
         Base.metadata.create_all(_db.engine)
         yield test_app
         _db.session.remove()
-        
+
         # Safely delete all data ignoring FK constraints in SQLite
         with _db.engine.connect() as conn:
             conn.execute(_db.text("PRAGMA foreign_keys = OFF;"))

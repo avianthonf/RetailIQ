@@ -1,10 +1,13 @@
-import pytest
 import json
-from datetime import datetime, timezone, timedelta
-from app.offline.builder import build_snapshot
-from app.models import AnalyticsSnapshot, DailyStoreSummary, DailySkuSummary, Product
-from app import db
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from app import db
+from app.models import AnalyticsSnapshot, DailySkuSummary, DailyStoreSummary, Product
+from app.offline.builder import build_snapshot
+
 
 @pytest.fixture(autouse=True)
 def mock_celery_task_session(monkeypatch):
@@ -17,7 +20,7 @@ def test_snapshot_builder_structure(app, test_store):
     with app.app_context():
         store_id = test_store.store_id
         snapshot = build_snapshot(store_id, db)
-        
+
         # Verify required top-level keys
         assert "kpis" in snapshot
         assert "revenue_30d" in snapshot
@@ -25,7 +28,7 @@ def test_snapshot_builder_structure(app, test_store):
         assert "alerts_open" in snapshot
         assert "low_stock_products" in snapshot
         assert "built_at" in snapshot
-        
+
         # specific subkeys
         assert "today_revenue" in snapshot["kpis"]
         assert "today_profit" in snapshot["kpis"]
@@ -38,15 +41,15 @@ def test_snapshot_size_enforcement(app, test_store):
     with app.app_context():
         store_id = test_store.store_id
         today = datetime.now(timezone.utc).date()
-        
+
         # Seed 40 days of history and many products to force a 50KB overflow
         # Actually it takes a LOT of products to hit 50KB.
         # Let's mock a very large dataset directly into the builder's loop return
-        
+
         # Instead of injecting 500 fake records into sqlite (which is slow),
         # we can just run the builder on an empty store, and manipulate the 50KB check artificially
         # or we can insert exactly 40 days and see if it clips to 14.
-        
+
         for i in range(40):
             dss = DailyStoreSummary(
                 store_id=store_id,
@@ -56,7 +59,7 @@ def test_snapshot_size_enforcement(app, test_store):
                 transaction_count=50
             )
             db.session.add(dss)
-        
+
         category_id = 1
         for i in range(500):
             p = Product(
@@ -71,11 +74,11 @@ def test_snapshot_size_enforcement(app, test_store):
                 reorder_level=10
             )
             db.session.add(p)
-            
+
         db.session.commit()
-        
+
         snapshot = build_snapshot(store_id, db)
-        
+
         serialized = json.dumps(snapshot)
         assert len(serialized.encode('utf-8')) <= 51200 # 50 KB strict allowance
 
@@ -90,7 +93,7 @@ def test_snapshot_endpoint_returns_200_after_task(app, client, owner_headers, te
     with app.app_context():
         from app.tasks.tasks import build_analytics_snapshot
         build_analytics_snapshot(test_store.store_id)
-        
+
     # hit API
     resp = client.get('/api/v1/offline/snapshot', headers=owner_headers)
     assert resp.status_code == 200
@@ -104,12 +107,12 @@ def test_snapshot_upsert_idempotent(app, test_store):
     with app.app_context():
         store_id = test_store.store_id
         from app.tasks.tasks import build_analytics_snapshot
-        
+
         build_analytics_snapshot(store_id)
         db.session.expire_all()
         count1 = db.session.query(AnalyticsSnapshot).filter_by(store_id=store_id).count()
         assert count1 == 1
-        
+
         build_analytics_snapshot(store_id)
         db.session.expire_all()
         count2 = db.session.query(AnalyticsSnapshot).filter_by(store_id=store_id).count()

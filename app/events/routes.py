@@ -1,13 +1,15 @@
-from datetime import datetime, date, timedelta, timezone
-from flask import request, g
-from sqlalchemy import text, and_, or_
+from datetime import date, datetime, timedelta, timezone
+
+from flask import g, request
+from sqlalchemy import and_, or_, text
 
 from app import db
-from app.models import BusinessEvent, Product
-from app.events import events_bp
 from app.auth.decorators import require_auth
 from app.auth.utils import format_response
+from app.events import events_bp
 from app.forecasting.engine import generate_demand_forecast
+from app.models import BusinessEvent, Product
+
 
 @events_bp.route('/events', methods=['GET'])
 @require_auth
@@ -87,7 +89,7 @@ def create_event():
         is_recurring=payload.get('is_recurring', False),
         recurrence_rule=payload.get('recurrence_rule')
     )
-    
+
     db.session.add(event)
     db.session.commit()
 
@@ -100,7 +102,7 @@ def update_event(event_id):
     """Update an existing event."""
     store_id = g.current_user.get('store_id')
     event = db.session.query(BusinessEvent).filter_by(id=event_id, store_id=store_id).first()
-    
+
     if not event:
         return format_response(error={"code": "NOT_FOUND", "message": "Event not found"}), 404
 
@@ -137,13 +139,13 @@ def delete_event(event_id):
     """Delete an event."""
     store_id = g.current_user.get('store_id')
     event = db.session.query(BusinessEvent).filter_by(id=event_id, store_id=store_id).first()
-    
+
     if not event:
         return format_response(error={"code": "NOT_FOUND", "message": "Event not found"}), 404
 
     db.session.delete(event)
     db.session.commit()
-    
+
     return format_response(data={"status": "DELETED"})
 
 
@@ -153,7 +155,7 @@ def upcoming_events():
     """List next X days of events."""
     store_id = g.current_user.get('store_id')
     days_str = request.args.get('days', '30')
-    
+
     try:
         days = int(days_str)
     except ValueError:
@@ -185,7 +187,7 @@ def upcoming_events():
 def demand_sensing(product_id):
     """Returns base forecast, event_adjusted_forecast and active events for next 14 days."""
     store_id = g.current_user.get('store_id')
-    
+
     # Verify product belongs to store
     prod = db.session.query(Product).filter_by(product_id=product_id, store_id=store_id).first()
     if not prod:

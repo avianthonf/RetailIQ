@@ -1,14 +1,15 @@
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta, date
+from datetime import date, datetime, timedelta, timezone
 
-from flask import request, g, jsonify
+from flask import g, jsonify, request
 from sqlalchemy import func
-from . import staff_performance_bp
+
+from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..auth.utils import format_response
-from ..models import StaffSession, StaffDailyTarget, Transaction, TransactionItem, User
-from .. import db
+from ..models import StaffDailyTarget, StaffSession, Transaction, TransactionItem, User
+from . import staff_performance_bp
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def get_all_staff_performance():
     staff_members = db.session.query(User).filter(
         User.store_id == store_id,
         User.role == 'staff',
-        User.is_active == True
+        User.is_active is True
     ).all()
 
     # Get their sessions for today to link transactions
@@ -137,7 +138,7 @@ def get_all_staff_performance():
     # Wait, the prompt says "Modify app/transactions/routes.py POST handler... query for their OPEN session and attach session_id". This means we can aggregate transactions by session_id, and link session_id to user_id.
 
     # 1. Get today's sessions for the store
-    todays_sessions = db.session.query(StaffSession).filter(
+    db.session.query(StaffSession).filter(
         StaffSession.store_id == store_id,
         func.date(StaffSession.started_at) == today
     ).subquery()
@@ -165,7 +166,7 @@ def get_all_staff_performance():
     ).filter(
         Transaction.store_id == store_id,
         func.date(Transaction.created_at) == today,
-        Transaction.is_return == False
+        Transaction.is_return is False
     ).group_by(StaffSession.user_id).all()
 
     agg_map = {row.user_id: row for row in txn_agg}
@@ -179,9 +180,9 @@ def get_all_staff_performance():
         today_txn_count = int(stats.txn_count) if stats else 0
         today_discount = float(stats.total_discount) if stats and stats.total_discount else 0.0
         gross_rev = float(stats.gross_revenue) if stats and stats.gross_revenue else 0.0
-        
+
         avg_discount_pct = (today_discount / gross_rev * 100) if gross_rev > 0 else 0.0
-        
+
         target_revenue = float(target.revenue_target) if target and target.revenue_target else None
         target_pct_achieved = (today_revenue / target_revenue * 100) if target_revenue and target_revenue > 0 else None
 
@@ -204,7 +205,7 @@ def get_all_staff_performance():
 def get_staff_performance_detail(user_id):
     """OWNER ONLY: Returns historical 30-day performance for a specific user."""
     store_id = g.current_user['store_id']
-    
+
     # Verify staff belongs to store
     staff = db.session.query(User).filter(
         User.user_id == user_id,
@@ -217,7 +218,7 @@ def get_staff_performance_detail(user_id):
 
     thirty_days_ago = datetime.now(timezone.utc).date() - timedelta(days=30)
 
-    # We need daily grouping. 
+    # We need daily grouping.
     daily_stats = db.session.query(
         func.date(Transaction.created_at).label('txn_date'),
         func.count(Transaction.transaction_id.distinct()).label('txn_count'),
@@ -230,7 +231,7 @@ def get_staff_performance_detail(user_id):
         Transaction.store_id == store_id,
         StaffSession.user_id == user_id,
         func.date(Transaction.created_at) >= thirty_days_ago,
-        Transaction.is_return == False
+        Transaction.is_return is False
     ).group_by(func.date(Transaction.created_at)).order_by(func.date(Transaction.created_at).desc()).all()
 
     targets = db.session.query(StaffDailyTarget).filter(

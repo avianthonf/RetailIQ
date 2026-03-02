@@ -1,5 +1,6 @@
 from marshmallow import Schema, fields, validate
 
+
 class RegisterSchema(Schema):
     mobile_number = fields.String(required=True, validate=validate.Length(min=10, max=15))
     password = fields.String(required=True, validate=validate.Length(min=6))

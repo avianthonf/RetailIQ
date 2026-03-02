@@ -4,15 +4,16 @@ Pricing API Routes
 All endpoints require JWT auth. Store-scoped via g.current_user['store_id'].
 """
 from datetime import datetime, timezone
-from flask import request, g
+
+from flask import g, request
 from sqlalchemy import text
 
-from . import pricing_bp
 from app import db
-from app.models import PricingSuggestion, PricingRule, Product, ProductPriceHistory
 from app.auth.decorators import require_auth
 from app.auth.utils import format_response
+from app.models import PricingRule, PricingSuggestion, Product, ProductPriceHistory
 
+from . import pricing_bp
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -179,7 +180,7 @@ def dismiss_suggestion(suggestion_id: int):
 @pricing_bp.route("/history", methods=["GET"])
 @require_auth
 def price_history():
-    store_id   = _store_id()
+    _store_id()
     product_id = request.args.get("product_id", type=int)
 
     if not product_id:

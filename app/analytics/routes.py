@@ -11,19 +11,24 @@ Dashboard is registered separately at /api/v1/dashboard.
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
 from collections import defaultdict
+from datetime import date, timedelta
 
-from flask import jsonify, request, g, current_app, Blueprint
+from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import text
 
 from app import db
 from app.auth.decorators import require_auth, require_role
 from app.auth.utils import format_response
+
 from .helpers import (
-    cache_response, parse_date, aggregate_by_period,
-    compute_7d_moving_avg, bucket_date,
-    build_7d_revenue_series, zero_fill_date_range,
+    aggregate_by_period,
+    bucket_date,
+    build_7d_revenue_series,
+    cache_response,
+    compute_7d_moving_avg,
+    parse_date,
+    zero_fill_date_range,
 )
 
 analytics_bp = Blueprint('analytics', __name__)
@@ -243,7 +248,7 @@ def contribution():
     current = _sku_totals(start, end)
     prior   = _sku_totals(cmp_start, cmp_end)
 
-    all_pids = set(current) | set(prior)
+    set(current) | set(prior)
     total_rev_current = sum(float(current[p].rev or 0) for p in current)
     total_rev_prior   = sum(float(prior[p].rev or 0)   for p in prior)
     total_rev_change  = total_rev_current - total_rev_prior

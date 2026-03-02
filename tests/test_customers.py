@@ -5,12 +5,12 @@ Reuses shared conftest fixtures (app, client, owner_headers, staff_headers,
 test_store, test_owner, test_category, test_product).
 """
 import uuid
-import pytest
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app import db
 from app.models import Customer, Transaction, TransactionItem
-
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -99,8 +99,8 @@ def test_duplicate_mobile_same_store_rejected(client, owner_headers, test_store)
 
 def test_duplicate_mobile_different_store_allowed(client, app, owner_headers, test_store):
     """Same mobile as a customer in test_store but inserted directly into a NEW store."""
-    from app.models import Store, User
     from app.auth.utils import generate_access_token
+    from app.models import Store, User
 
     # create another store + owner
     other_store = Store(store_name="Other Shop", store_type="general")

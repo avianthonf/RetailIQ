@@ -2,19 +2,25 @@
 Tests for GST: Schema, HSN Master, and GSTR-1 Generation (Prompt 7.B)
 """
 import uuid
-import pytest
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
+import pytest
 
 from app import db
+from app.gst.utils import validate_gstin
 from app.models import (
-    HSNMaster, StoreGSTConfig, GSTTransaction, GSTFilingPeriod,
-    Product, Transaction, TransactionItem, Category
+    Category,
+    GSTFilingPeriod,
+    GSTTransaction,
+    HSNMaster,
+    Product,
+    StoreGSTConfig,
+    Transaction,
+    TransactionItem,
 )
 from app.transactions.services import process_single_transaction
-from app.gst.utils import validate_gstin
-
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
@@ -211,13 +217,14 @@ def test_gst_liability_slab_breakdown(app, client, owner_headers, test_store, gs
 # ── g. test_monthly_compilation_task ──────────────────────────────────
 
 def test_monthly_compilation_task(app, test_store, gst_enabled_store, gst_product, mock_celery_task_session):
-    from app.tasks.tasks import compile_monthly_gst
     import json
+
+    from app.tasks.tasks import compile_monthly_gst
 
     period = datetime.now(timezone.utc).strftime('%Y-%m')
 
     # Seed 5 transactions
-    for i in range(5):
+    for _i in range(5):
         txn_data = {
             'transaction_id': uuid.uuid4(),
             'timestamp': datetime.now(timezone.utc),
@@ -249,7 +256,7 @@ def test_monthly_compilation_task(app, test_store, gst_enabled_store, gst_produc
     assert filing.gstr1_json_path is not None
     import os
     assert os.path.exists(filing.gstr1_json_path)
-    with open(filing.gstr1_json_path, 'r') as f:
+    with open(filing.gstr1_json_path) as f:
         gstr1 = json.load(f)
     assert gstr1['gstin'] == '27AAPFU0939F1ZV'
     assert len(gstr1['hsn']['data']) >= 1

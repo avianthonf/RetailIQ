@@ -1,12 +1,21 @@
+import uuid
+from datetime import datetime, timedelta, timezone
+
 import pytest
+
 from app import db
 from app.models import (
-    LoyaltyProgram, CustomerLoyaltyAccount, LoyaltyTransaction,
-    CreditLedger, CreditTransaction, Customer, Transaction, TransactionItem
+    CreditLedger,
+    CreditTransaction,
+    Customer,
+    CustomerLoyaltyAccount,
+    LoyaltyProgram,
+    LoyaltyTransaction,
+    Transaction,
+    TransactionItem,
 )
 from app.transactions.services import process_single_transaction
-import uuid
-from datetime import datetime, timezone, timedelta
+
 
 @pytest.fixture
 def mock_celery_task_session(monkeypatch):
@@ -50,7 +59,7 @@ def test_points_earned_on_transaction(app, test_store, test_product, loyalty_cus
     acc = db.session.query(CustomerLoyaltyAccount).filter_by(customer_id=loyalty_customer_id).first()
     assert acc is not None
     assert float(acc.total_points) == 150.0
-    
+
     # Check transaction
     ltx = db.session.query(LoyaltyTransaction).filter_by(account_id=acc.id).first()
     assert ltx is not None
@@ -59,7 +68,6 @@ def test_points_earned_on_transaction(app, test_store, test_product, loyalty_cus
 
 # b. test_points_accrual_is_atomic
 def test_points_accrual_is_atomic(app, test_store, test_product, loyalty_customer_id, loyalty_program_id, monkeypatch):
-    original_init = LoyaltyTransaction.__init__
     def failing_init(self, *args, **kwargs):
         raise ValueError("Simulated DB failure")
 
@@ -87,11 +95,11 @@ def test_redeem_points_reduces_balance(client, owner_headers, test_store, loyalt
     acc = CustomerLoyaltyAccount(customer_id=loyalty_customer_id, store_id=test_store.store_id, total_points=500, redeemable_points=500, lifetime_earned=500)
     db.session.add(acc)
     db.session.commit()
-        
-    resp = client.post(f"/api/v1/loyalty/customers/{loyalty_customer_id}/redeem", 
+
+    resp = client.post(f"/api/v1/loyalty/customers/{loyalty_customer_id}/redeem",
                        headers=owner_headers, json={"points_to_redeem": 200})
     assert resp.status_code == 200
-    
+
     acc = db.session.query(CustomerLoyaltyAccount).filter_by(customer_id=loyalty_customer_id).first()
     assert float(acc.total_points) == 300.0
     assert float(acc.redeemable_points) == 300.0
@@ -100,8 +108,8 @@ def test_redeem_below_minimum_rejected(client, owner_headers, test_store, loyalt
     acc = CustomerLoyaltyAccount(customer_id=loyalty_customer_id, store_id=test_store.store_id, total_points=500, redeemable_points=500, lifetime_earned=500)
     db.session.add(acc)
     db.session.commit()
-    
-    resp = client.post(f"/api/v1/loyalty/customers/{loyalty_customer_id}/redeem", 
+
+    resp = client.post(f"/api/v1/loyalty/customers/{loyalty_customer_id}/redeem",
                        headers=owner_headers, json={"points_to_redeem": 50})
     assert resp.status_code == 422
     assert "below minimum" in resp.json["error"]["message"].lower()
@@ -111,7 +119,7 @@ def test_credit_sale_increments_balance(app, test_store, test_product, loyalty_c
     ledger = CreditLedger(customer_id=loyalty_customer_id, store_id=test_store.store_id, credit_limit=1000)
     db.session.add(ledger)
     db.session.commit()
-    
+
     txn_data = {
         "transaction_id": uuid.uuid4(),
         "timestamp": datetime.now(timezone.utc),
@@ -123,10 +131,10 @@ def test_credit_sale_increments_balance(app, test_store, test_product, loyalty_c
     }
     process_single_transaction(txn_data, test_store.store_id)
     db.session.commit()
-    
+
     l = db.session.query(CreditLedger).filter_by(customer_id=loyalty_customer_id).first()
     assert float(l.balance) == 400.0
-    
+
     ctx = db.session.query(CreditTransaction).filter_by(ledger_id=l.id).first()
     assert ctx.type == 'CREDIT_SALE'
     assert float(ctx.amount) == 400.0
@@ -135,7 +143,7 @@ def test_credit_sale_blocked_over_limit(app, test_store, test_product, loyalty_c
     ledger = CreditLedger(customer_id=loyalty_customer_id, store_id=test_store.store_id, credit_limit=500, balance=200)
     db.session.add(ledger)
     db.session.commit()
-    
+
     txn_data = {
         "transaction_id": uuid.uuid4(),
         "timestamp": datetime.now(timezone.utc),
@@ -145,7 +153,7 @@ def test_credit_sale_blocked_over_limit(app, test_store, test_product, loyalty_c
             {"product_id": test_product.product_id, "quantity": 1, "selling_price": 400.0}
         ]
     }
-    
+
     with pytest.raises(ValueError, match="Credit limit"):
         process_single_transaction(txn_data, test_store.store_id)
 
@@ -153,26 +161,26 @@ def test_repayment_reduces_balance(client, owner_headers, test_store, loyalty_cu
     ledger = CreditLedger(customer_id=loyalty_customer_id, store_id=test_store.store_id, credit_limit=1000, balance=500)
     db.session.add(ledger)
     db.session.commit()
-        
+
     resp = client.post(f"/api/v1/credit/customers/{loyalty_customer_id}/repay",
                        headers=owner_headers, json={"amount": 200, "notes": "paid via upi"})
     assert resp.status_code == 200
-    
+
     l = db.session.query(CreditLedger).filter_by(customer_id=loyalty_customer_id).first()
     assert float(l.balance) == 300.0
 
 # Tasks Tests (h, i)
 def test_overdue_credit_alert_task(app, test_store, loyalty_customer_id, mock_celery_task_session):
-    from app.tasks.tasks import credit_overdue_alerts
     from app.models import Alert
-    
+    from app.tasks.tasks import credit_overdue_alerts
+
     old_date = datetime.utcnow() - timedelta(days=35)
     ledger = CreditLedger(customer_id=loyalty_customer_id, store_id=test_store.store_id, balance=500, updated_at=old_date)
     db.session.add(ledger)
     db.session.commit()
-    
+
     credit_overdue_alerts()
-    
+
     alert = db.session.query(Alert).filter_by(store_id=test_store.store_id, alert_type="credit_overdue").first()
     assert alert is not None
     assert alert.priority == 'HIGH'
@@ -211,7 +219,7 @@ def test_loyalty_account_alias(client, owner_headers, test_store, loyalty_custom
     acc = CustomerLoyaltyAccount(customer_id=loyalty_customer_id, store_id=test_store.store_id, total_points=500, redeemable_points=500, lifetime_earned=500)
     db.session.add(acc)
     db.session.commit()
-        
+
     resp = client.get(f"/api/v1/loyalty/customers/{loyalty_customer_id}/account", headers=owner_headers)
     assert resp.status_code == 200
     assert resp.json["data"]["total_points"] == 500.0
@@ -223,7 +231,7 @@ def test_loyalty_transactions_fetch(client, owner_headers, test_store, loyalty_c
     tx = LoyaltyTransaction(account_id=acc.id, type='EARN', points=500, balance_after=500, notes="Bonus")
     db.session.add(tx)
     db.session.commit()
-    
+
     resp = client.get(f"/api/v1/loyalty/customers/{loyalty_customer_id}/transactions", headers=owner_headers)
     assert resp.status_code == 200
     assert len(resp.json["data"]) == 1
@@ -233,7 +241,7 @@ def test_credit_account_alias(client, owner_headers, test_store, loyalty_custome
     ledger = CreditLedger(customer_id=loyalty_customer_id, store_id=test_store.store_id, credit_limit=1000, balance=500)
     db.session.add(ledger)
     db.session.commit()
-        
+
     resp = client.get(f"/api/v1/credit/customers/{loyalty_customer_id}/account", headers=owner_headers)
     assert resp.status_code == 200
     assert resp.json["data"]["balance"] == 500.0
@@ -245,7 +253,7 @@ def test_credit_transactions_fetch(client, owner_headers, test_store, loyalty_cu
     tx = CreditTransaction(ledger_id=ledger.id, type='CREDIT_SALE', amount=250, balance_after=250, notes="Purchase")
     db.session.add(tx)
     db.session.commit()
-    
+
     resp = client.get(f"/api/v1/credit/customers/{loyalty_customer_id}/transactions", headers=owner_headers)
     assert resp.status_code == 200
     assert len(resp.json["data"]) == 1

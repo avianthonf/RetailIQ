@@ -1,6 +1,8 @@
 import os
+
 from celery.schedules import crontab
-from app import create_app, celery_app
+
+from app import celery_app, create_app
 
 # Important: load tasks so celery recognizes them
 from app.tasks import tasks
@@ -9,7 +11,7 @@ from app.tasks.tasks import run_weekly_pricing_analysis  # noqa: F401
 app = create_app()
 app.app_context().push()
 
-celery_app.conf.timezone = 'Asia/Kolkata' 
+celery_app.conf.timezone = 'Asia/Kolkata'
 
 celery_app.conf.beat_schedule = {
     'rebuild_every_15_min': {

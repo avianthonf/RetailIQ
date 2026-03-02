@@ -1,11 +1,22 @@
 """
 Tests for WhatsApp Business API Integration (Prompt 8)
 """
-import pytest
 from datetime import datetime, timezone
 
+import pytest
+
 from app import db
-from app.models import WhatsAppConfig, WhatsAppMessageLog, Alert, PurchaseOrder, Supplier, Store, User, PurchaseOrderItem, Product
+from app.models import (
+    Alert,
+    Product,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Store,
+    Supplier,
+    User,
+    WhatsAppConfig,
+    WhatsAppMessageLog,
+)
 from app.whatsapp.client import send_text_message
 from app.whatsapp.formatters import format_po_message
 from app.whatsapp.routes import _encrypt_token
@@ -62,7 +73,7 @@ def test_po(app, test_store, test_supplier, test_product):
     )
     db.session.add(po)
     db.session.commit()
-    
+
     po_item = PurchaseOrderItem(
         po_id=po.id,
         product_id=test_product.product_id,
@@ -109,7 +120,7 @@ def test_access_token_encrypted_at_rest(client, owner_headers, test_store):
         }
     )
     assert resp.status_code == 200
-    
+
     config = db.session.query(WhatsAppConfig).filter_by(store_id=test_store.store_id).first()
     assert config is not None
     assert config.access_token_encrypted is not None
@@ -122,7 +133,7 @@ def test_po_message_format(app, test_po):
     """Call formatter with seeded PO, assert output contains store name and product names."""
     with app.app_context():
         text = format_po_message(str(test_po.id), db.session)
-        
+
         # Check if contents are formatted
         assert text.startswith("Purchase Order #"), text
         assert "From: Test Supermart" in text, text
@@ -140,7 +151,7 @@ def test_send_alert_dry_run(client, owner_headers, wa_config, test_alert):
     )
     assert resp.status_code == 200, resp.data
     assert "message_id" in resp.json['data']
-    
+
     log = db.session.query(WhatsAppMessageLog).filter_by(message_type='alert', store_id=wa_config.store_id).first()
     assert log is not None
     assert log.status == "SENT"
@@ -157,7 +168,7 @@ def test_send_po_creates_log_entry(client, owner_headers, wa_config, test_po):
     )
     assert resp.status_code == 200
     assert "message_id" in resp.json['data']
-    
+
     log = db.session.query(WhatsAppMessageLog).filter_by(message_type='purchase_order', store_id=wa_config.store_id).first()
     assert log is not None
     assert log.status == "QUEUED" # as per routes.py, PO sets to QUEUED initially on 'messages' success in dry run

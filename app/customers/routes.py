@@ -1,15 +1,16 @@
-from flask import request, g
-from datetime import datetime, timedelta, timezone, date as date_type
-from marshmallow import ValidationError
+from datetime import date as date_type
+from datetime import datetime, timedelta, timezone
 
-from . import customers_bp
-from .schemas import CustomerCreateSchema, CustomerUpdateSchema
+from flask import g, request
+from marshmallow import ValidationError
+from sqlalchemy import and_, case, distinct, func
+
+from .. import db
 from ..auth.decorators import require_auth
 from ..auth.utils import format_response
-from ..models import Customer, Transaction, TransactionItem, Category, Product
-from .. import db
-from sqlalchemy import func, and_, case, distinct
-
+from ..models import Category, Customer, Product, Transaction, TransactionItem
+from . import customers_bp
+from .schemas import CustomerCreateSchema, CustomerUpdateSchema
 
 # ──────────────────────────────────────────────────────────────
 # Helpers
@@ -55,7 +56,7 @@ def top_customers():
         db.session.query(Transaction.customer_id)
         .filter(
             Transaction.store_id == store_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
             Transaction.customer_id.isnot(None),
         )
     )
@@ -83,7 +84,7 @@ def top_customers():
             .join(TransactionItem, Transaction.transaction_id == TransactionItem.transaction_id)
             .filter(
                 Transaction.store_id == store_id,
-                Transaction.is_return == False,
+                Transaction.is_return is False,
                 Transaction.customer_id.isnot(None),
             )
             .group_by(Transaction.customer_id)
@@ -138,7 +139,7 @@ def analytics():
         db.session.query(Transaction.customer_id)
         .filter(
             Transaction.store_id == store_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
             Transaction.customer_id.isnot(None),
             Transaction.created_at >= month_start,
         )
@@ -158,7 +159,7 @@ def analytics():
         )
         .filter(
             Transaction.store_id == store_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
             Transaction.customer_id.isnot(None),
         )
         .group_by(Transaction.customer_id)
@@ -174,14 +175,14 @@ def analytics():
         func.count(distinct(Transaction.customer_id))
     ).filter(
         Transaction.store_id == store_id,
-        Transaction.is_return == False,
+        Transaction.is_return is False,
         Transaction.customer_id.isnot(None),
         Transaction.created_at >= month_start,
         Transaction.customer_id.in_(
             db.session.query(Transaction.customer_id)
             .filter(
                 Transaction.store_id == store_id,
-                Transaction.is_return == False,
+                Transaction.is_return is False,
                 Transaction.customer_id.isnot(None),
                 Transaction.created_at < month_start,
             )
@@ -213,7 +214,7 @@ def analytics():
             .join(Transaction, Transaction.transaction_id == TransactionItem.transaction_id)
             .filter(
                 Transaction.store_id == store_id,
-                Transaction.is_return == False,
+                Transaction.is_return is False,
                 Transaction.customer_id.isnot(None),
                 Transaction.created_at >= month_start,
             )
@@ -405,7 +406,7 @@ def customer_transactions(customer_id):
         .filter(
             Transaction.store_id == store_id,
             Transaction.customer_id == customer_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
         )
     )
 
@@ -491,7 +492,7 @@ def customer_summary(customer_id):
         .filter(
             Transaction.store_id == store_id,
             Transaction.customer_id == customer_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
         )
         .one()
     )
@@ -518,7 +519,7 @@ def customer_summary(customer_id):
         .filter(
             Transaction.store_id == store_id,
             Transaction.customer_id == customer_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
         )
         .group_by(Product.category_id, Category.name)
         .order_by(func.sum(
@@ -542,7 +543,7 @@ def customer_summary(customer_id):
         .filter(
             Transaction.store_id == store_id,
             Transaction.customer_id == customer_id,
-            Transaction.is_return == False,
+            Transaction.is_return is False,
         )
         .order_by(Transaction.created_at)
         .all()

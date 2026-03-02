@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any
+from typing import Any, Dict
 
 # Ordered by precedence
 # forecast > inventory > revenue > profit > default
@@ -17,9 +17,9 @@ def resolve_intent(query: str) -> str:
     """Return the highest precedence intent that matches the query."""
     if not query or len(query) > 200:
         return "default"
-        
+
     for intent, pattern in INTENT_PATTERNS:
         if re.search(pattern, query):
             return intent
-            
+
     return "default"

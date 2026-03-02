@@ -4,15 +4,12 @@ Tests for /api/v1/inventory/* and /api/v1/products/* endpoints.
 Uses the shared conftest fixtures (app, client, owner_headers, staff_headers,
 test_store, test_owner, test_staff, test_category, test_product).
 """
-import pytest
 from datetime import datetime, timezone
 
-from app import db
-from app.models import (
-    Product, ProductPriceHistory, StockAdjustment,
-    StockAudit, StockAuditItem, Alert
-)
+import pytest
 
+from app import db
+from app.models import Alert, Product, ProductPriceHistory, StockAdjustment, StockAudit, StockAuditItem
 
 # ─────────────────────────────────────────────────────────────
 # 1. Create product – happy path

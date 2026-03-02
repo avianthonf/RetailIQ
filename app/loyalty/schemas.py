@@ -1,5 +1,6 @@
 from marshmallow import Schema, fields, validate
 
+
 class LoyaltyProgramUpsertSchema(Schema):
     points_per_rupee = fields.Float(validate=validate.Range(min=0))
     redemption_rate = fields.Float(validate=validate.Range(min=0))

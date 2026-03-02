@@ -17,14 +17,14 @@ import re
 import uuid as uuid_module
 from datetime import datetime, timezone
 
-from flask import request, g
+from flask import g, request
 
-from . import receipts_bp
-from .formatter import build_receipt_payload
+from .. import db
 from ..auth.decorators import require_auth
 from ..auth.utils import format_response
-from ..models import Barcode, ReceiptTemplate, PrintJob, Product, Transaction
-from .. import db
+from ..models import Barcode, PrintJob, Product, ReceiptTemplate, Transaction
+from . import receipts_bp
+from .formatter import build_receipt_payload
 
 # ---------------------------------------------------------------------------
 # Barcode value validation: alphanumeric + hyphens, 4–64 chars

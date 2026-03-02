@@ -1,24 +1,23 @@
-import hmac
+import base64
+import contextlib
 import hashlib
+import hmac
 import json
 from datetime import datetime, timezone
-from flask import current_app, request, g, jsonify
-from marshmallow import ValidationError
-from cryptography.fernet import Fernet
-import base64
 
-from . import whatsapp_bp
-from .schemas import WhatsAppConfigUpsertSchema, SendAlertSchema, SendPOSchema
-from .client import send_text_message, send_template_message
-from .formatters import format_po_message
+from cryptography.fernet import Fernet
+from flask import current_app, g, jsonify, request
+from marshmallow import ValidationError
+from sqlalchemy import desc
+
+from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..auth.utils import format_response
-from ..models import (
-    WhatsAppConfig, WhatsAppMessageLog, WhatsAppTemplate,
-    Store, User, Alert, PurchaseOrder, Supplier
-)
-from .. import db
-from sqlalchemy import desc
+from ..models import Alert, PurchaseOrder, Store, Supplier, User, WhatsAppConfig, WhatsAppMessageLog, WhatsAppTemplate
+from . import whatsapp_bp
+from .client import send_template_message, send_text_message
+from .formatters import format_po_message
+from .schemas import SendAlertSchema, SendPOSchema, WhatsAppConfigUpsertSchema
 
 
 def _get_fernet() -> Fernet:
@@ -96,7 +95,7 @@ def update_config():
         config.is_active = data['is_active']
     if 'access_token' in data and data['access_token']:
         config.access_token_encrypted = _encrypt_token(data['access_token'])
-    
+
     db.session.commit()
     return format_response(True, data={
         'phone_number_id': config.phone_number_id,
@@ -141,28 +140,26 @@ def webhook_receive():
     for entry in data.get('entry', []):
         for change in entry.get('changes', []):
             value = change.get('value', {})
-            
+
             # Handle status updates (delivered, read, failed)
             if 'statuses' in value:
                 for status_update in value['statuses']:
                     wa_message_id = status_update.get('id')
                     status_text = status_update.get('status')
                     timestamp = status_update.get('timestamp')
-                    
+
                     if wa_message_id and status_text:
                         log_entry = db.session.query(WhatsAppMessageLog).filter_by(wa_message_id=wa_message_id).first()
                         if log_entry:
                             log_entry.status = status_text.upper()
                             if status_text in ('delivered', 'read'):
-                                try:
+                                with contextlib.suppress(Exception):
                                     log_entry.delivered_at = datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
-                                except Exception:
-                                    pass
-                            
+
                             errors = status_update.get('errors', [])
                             if errors:
                                 log_entry.error_message = json.dumps(errors)
-                                
+
             # (We could also handle incoming messages here if required by future feature sets)
             # if 'messages' in value: ...
 
@@ -196,10 +193,10 @@ def send_alert():
     owner = db.session.query(User).filter_by(store_id=store_id, role='owner', is_active=True).first()
     if not owner or not owner.mobile_number:
         return format_response(False, error={"code": "NO_RECIPIENT", "message": "Could not find owner phone number"}), 400
-    
+
     access_token = _decrypt_token(config.access_token_encrypted)
     text = f"RetailIQ Alert ({alert.priority}):\n\n{alert.message}"
-    
+
     # Send
     resp = send_text_message(config.phone_number_id, access_token, f"91{owner.mobile_number}", text)
 

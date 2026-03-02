@@ -2,13 +2,13 @@
 Analytics helpers — shared utilities for all analytics endpoints.
 """
 from __future__ import annotations
-import json
+
 import functools
+import json
 from datetime import date, timedelta
 from typing import Any
 
-from flask import g, current_app
-
+from flask import current_app, g
 
 # ── Redis cache ───────────────────────────────────────────────────────────────
 
@@ -146,10 +146,7 @@ def zero_fill_date_range(
     cursor = start
     while cursor <= end:
         key = cursor.isoformat()
-        if key in existing:
-            entry = dict(existing[key])
-        else:
-            entry = {date_key: key, **{k: 0.0 for k in value_keys}}
+        entry = dict(existing[key]) if key in existing else {date_key: key, **{k: 0.0 for k in value_keys}}
         result.append(entry)
         cursor += timedelta(days=1)
     return result

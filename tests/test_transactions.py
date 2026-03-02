@@ -1,13 +1,15 @@
-import pytest
-import uuid
-from datetime import datetime, timedelta, timezone, date
-from app import create_app, db
-from app.models import User, Store, Product, Category, Transaction, TransactionItem
-from app.auth.utils import generate_access_token
-
 import os
-from sqlalchemy.ext.compiler import compiles
+import uuid
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.compiler import compiles
+
+from app import create_app, db
+from app.auth.utils import generate_access_token
+from app.models import Category, Product, Store, Transaction, TransactionItem, User
+
 
 @compiles(JSONB, "sqlite")
 def compile_jsonb(type_, compiler, **kw):
@@ -24,20 +26,20 @@ def init_db(app):
     store = Store(store_name="Test Store")
     db.session.add(store)
     db.session.commit()
-    
+
     owner = User(mobile_number="1234567890", role="owner", store_id=store.store_id, is_active=True)
     staff = User(mobile_number="0987654321", role="staff", store_id=store.store_id, is_active=True)
     db.session.add_all([owner, staff])
-    
+
     cat = Category(store_id=store.store_id, name="Test Category")
     db.session.add(cat)
     db.session.commit()
-    
+
     prod1 = Product(store_id=store.store_id, category_id=cat.category_id, name="Product 1", selling_price=10.0, current_stock=50.0, cost_price=5.0)
     prod2 = Product(store_id=store.store_id, category_id=cat.category_id, name="Product 2", selling_price=20.0, current_stock=20.0, cost_price=10.0)
     db.session.add_all([prod1, prod2])
     db.session.commit()
-    
+
     return {
         "store": store,
         "owner": owner,
@@ -71,13 +73,13 @@ def test_single_sale(client, init_db, auth_headers):
             }
         ]
     }
-    
+
     resp = client.post('/api/v1/transactions', json=payload, headers=auth_headers['staff'])
     assert resp.status_code == 201
-    
+
     prod1 = db.session.get(Product, init_db['prod1'].product_id)
     assert float(prod1.current_stock) == 48.0
-    
+
     txn = db.session.get(Transaction, uuid.UUID(txn_id))
     assert txn is not None
     assert txn.payment_mode == "CASH"
@@ -85,7 +87,7 @@ def test_single_sale(client, init_db, auth_headers):
 def test_batch_idempotent(client, init_db, auth_headers):
     txn_id_1 = str(uuid.uuid4())
     txn_id_2 = str(uuid.uuid4())
-    
+
     payload = {
         "transactions": [
             {
@@ -106,11 +108,11 @@ def test_batch_idempotent(client, init_db, auth_headers):
             }
         ]
     }
-    
+
     resp = client.post('/api/v1/transactions/batch', json=payload, headers=auth_headers['owner'])
     assert resp.status_code == 200
     assert resp.json['data']['accepted'] == 2
-    
+
     txn_id_3 = str(uuid.uuid4())
     payload['transactions'].append({
         "transaction_id": txn_id_3,
@@ -120,12 +122,12 @@ def test_batch_idempotent(client, init_db, auth_headers):
             {"product_id": init_db['prod1'].product_id, "quantity": 2.0, "selling_price": 10.0}
         ]
     })
-    
+
     resp2 = client.post('/api/v1/transactions/batch', json=payload, headers=auth_headers['owner'])
     assert resp2.status_code == 200
     assert resp2.json['data']['accepted'] == 1
     assert resp2.json['data']['errors'] == []
-    
+
     prod2 = db.session.get(Product, init_db['prod2'].product_id)
     assert float(prod2.current_stock) == 19.0
 
@@ -139,7 +141,7 @@ def test_staff_date_restriction(client, init_db, auth_headers):
         is_return=False
     )
     db.session.add(old_txn)
-    
+
     new_txn = Transaction(
         transaction_id=uuid.uuid4(),
         store_id=init_db['store'].store_id,
@@ -149,10 +151,10 @@ def test_staff_date_restriction(client, init_db, auth_headers):
     )
     db.session.add(new_txn)
     db.session.commit()
-    
+
     resp = client.get('/api/v1/transactions', headers=auth_headers['owner'])
     assert len(resp.json['data']) == 2
-    
+
     resp_staff = client.get('/api/v1/transactions', headers=auth_headers['staff'])
     assert len(resp_staff.json['data']) == 1
     assert resp_staff.json['data'][0]['payment_mode'] == "UPI"
@@ -174,7 +176,7 @@ def test_return_transaction(client, init_db, auth_headers):
     client.post('/api/v1/transactions', json=payload, headers=auth_headers['staff'])
     prod1 = db.session.get(Product, init_db['prod1'].product_id)
     assert float(prod1.current_stock) == 40.0
-    
+
     return_payload = {
         "items": [
             {"product_id": init_db['prod1'].product_id, "quantity_returned": 2.0}
@@ -182,10 +184,10 @@ def test_return_transaction(client, init_db, auth_headers):
     }
     resp = client.post(f'/api/v1/transactions/{txn_id}/return', json=return_payload, headers=auth_headers['staff'])
     assert resp.status_code == 403
-    
+
     resp_owner = client.post(f'/api/v1/transactions/{txn_id}/return', json=return_payload, headers=auth_headers['owner'])
     assert resp_owner.status_code == 201
-    
+
     prod1 = db.session.get(Product, init_db['prod1'].product_id)
     assert float(prod1.current_stock) == 42.0
 

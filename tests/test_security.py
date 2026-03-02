@@ -8,11 +8,11 @@ Tests:
 """
 import io
 import logging
-import pytest
 
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.ext.compiler import compiles
+import pytest
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.pool import StaticPool
 
 # Re-use the SQLite type shims (idempotent — if conftest already ran, these are no-ops)
 try:
@@ -26,10 +26,10 @@ try:
 except Exception:
     pass
 
-from app import create_app, db as _db
-from app.models import Base, User, Store, Supplier, Product, Category
+from app import create_app
+from app import db as _db
 from app.auth.utils import generate_access_token
-
+from app.models import Base, Category, Product, Store, Supplier, User
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ def rate_limit_app():
         "RATELIMIT_STORAGE_URI": "memory://",
     })
     with app.app_context():
-        from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
 
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         private_pem = private_key.private_bytes(
@@ -123,7 +123,7 @@ def test_login_rate_limit(rl_client, rate_limit_app):
 
     payload = {"mobile_number": "9999900000", "password": "test123"}
     last_status = None
-    for i in range(11):
+    for _i in range(11):
         resp = rl_client.post("/api/v1/auth/login", json=payload)
         last_status = resp.status_code
         if last_status == 429:

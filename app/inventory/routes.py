@@ -1,22 +1,26 @@
-from flask import request, g
-from datetime import datetime, timedelta, timezone, date as date_type
-from marshmallow import ValidationError
+import contextlib
+from datetime import date as date_type
+from datetime import datetime, timedelta, timezone
 
-from . import inventory_bp
-from .schemas import (
-    ProductCreateSchema, ProductUpdateSchema,
-    StockUpdateSchema, StockAuditSchema
-)
+from flask import g, request
+from marshmallow import ValidationError
+from sqlalchemy import and_, exists, func, select
+
+from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..auth.utils import format_response
 from ..models import (
-    Product, ProductPriceHistory, Category,
-    StockAdjustment, StockAudit, StockAuditItem,
-    Alert, DailySkuSummary
+    Alert,
+    Category,
+    DailySkuSummary,
+    Product,
+    ProductPriceHistory,
+    StockAdjustment,
+    StockAudit,
+    StockAuditItem,
 )
-from .. import db
-from sqlalchemy import func, and_, exists, select
-
+from . import inventory_bp
+from .schemas import ProductCreateSchema, ProductUpdateSchema, StockAuditSchema, StockUpdateSchema
 
 # ──────────────────────────────────────────────────────────────
 # Helpers
@@ -85,7 +89,7 @@ def _slow_moving_product_ids(store_id):
 
     slow = db.session.query(Product.product_id).filter(
         Product.store_id == store_id,
-        Product.is_active == True,
+        Product.is_active is True,
         ~Product.product_id.in_(select(sold_ids.c.product_id)),
     ).all()
     return {row.product_id for row in slow}
@@ -309,10 +313,8 @@ def stock_update(product_id):
     # Create adjustment record
     adjusted_at = datetime.now(timezone.utc)
     if data.get('date'):
-        try:
+        with contextlib.suppress(ValueError):
             adjusted_at = datetime.strptime(data['date'], '%Y-%m-%d').replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
 
     adj = StockAdjustment(
         product_id=product_id,

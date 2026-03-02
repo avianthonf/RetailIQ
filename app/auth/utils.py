@@ -1,10 +1,12 @@
-import uuid
-import jwt
 import random
 import string
+import uuid
 from datetime import datetime, timedelta, timezone
+
+import jwt
 import redis
 from flask import current_app
+
 
 def format_response(success=True, data=None, error=None, meta=None):
     """
@@ -26,7 +28,7 @@ def get_redis_client():
 def generate_access_token(user_id, store_id, role):
     from app import db
     from app.models import StoreGroup
-    
+
     private_key = current_app.config['JWT_PRIVATE_KEY']
     now = datetime.now(timezone.utc)
     payload = {

@@ -1,7 +1,7 @@
 import bcrypt
 
 from app import db
-from app.models import User, Store
+from app.models import Store, User
 
 
 class FakeRedis:

@@ -1,17 +1,17 @@
-from flask import request, g
+import contextlib
+from decimal import Decimal
+
+from flask import g, request
 from marshmallow import ValidationError
+from sqlalchemy import func
+
+from .. import db
+from ..auth.decorators import require_auth, require_role
+from ..auth.utils import format_response
+from ..models import GSTFilingPeriod, GSTTransaction, HSNMaster, StoreGSTConfig
 from . import gst_bp
 from .schemas import GSTConfigUpsertSchema
 from .utils import validate_gstin
-from ..auth.decorators import require_auth, require_role
-from ..auth.utils import format_response
-from ..models import (
-    StoreGSTConfig, HSNMaster, GSTTransaction, GSTFilingPeriod
-)
-from .. import db
-from sqlalchemy import func
-from decimal import Decimal
-
 
 # ── GST Config ──────────────────────────────────────────────────────
 
@@ -119,10 +119,8 @@ def gst_summary():
 
     # Trigger compilation if missing
     from app.tasks.tasks import compile_monthly_gst
-    try:
+    with contextlib.suppress(Exception):
         compile_monthly_gst.delay(store_id, period)
-    except Exception:
-        pass
 
     # Build on-the-fly summary from gst_transactions
     rows = db.session.query(
@@ -159,9 +157,10 @@ def get_gstr1():
     if not filing or not filing.gstr1_json_path:
         return format_response(False, error={"code": "NOT_FOUND", "message": f"GSTR-1 not compiled for period {period}"}), 404
 
-    import json, os
+    import json
+    import os
     if os.path.exists(filing.gstr1_json_path):
-        with open(filing.gstr1_json_path, 'r') as f:
+        with open(filing.gstr1_json_path) as f:
             gstr1_data = json.load(f)
         return format_response(True, data=gstr1_data), 200
 
@@ -185,7 +184,7 @@ def liability_slabs():
         if not gt.hsn_breakdown:
             continue
         breakdown = gt.hsn_breakdown if isinstance(gt.hsn_breakdown, dict) else {}
-        for hsn_code, detail in breakdown.items():
+        for _hsn_code, detail in breakdown.items():
             rate = detail.get('rate', 0)
             rate_key = float(rate)
             if rate_key not in slab_map:

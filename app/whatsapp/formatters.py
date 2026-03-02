@@ -9,16 +9,17 @@ def format_po_message(po_id: str, db_session) -> str:
         Purchase Order #{short_ref}
         From: {store_name}
         Date: {date}
-        
+
         Items:
         {product} x {qty} @ ₹{price}
         ...
         Total: ₹{total}
-        
+
         Please confirm receipt.
     """
     import uuid
-    from app.models import PurchaseOrder, PurchaseOrderItem, Product, Store
+
+    from app.models import Product, PurchaseOrder, PurchaseOrderItem, Store
 
     try:
         po_uuid = uuid.UUID(po_id) if isinstance(po_id, str) else po_id
@@ -31,12 +32,12 @@ def format_po_message(po_id: str, db_session) -> str:
 
     store = db_session.query(Store).filter_by(store_id=po.store_id).first()
     store_name = store.store_name if store else "RetailIQ Store"
-    
+
     date_str = po.created_at.strftime('%Y-%m-%d') if po.created_at else ''
     short_ref = str(po.id)[:8].upper()
 
     items = db_session.query(PurchaseOrderItem).filter_by(po_id=po_uuid).all()
-    
+
     lines = [
         f"Purchase Order #{short_ref}",
         f"From: {store_name}",

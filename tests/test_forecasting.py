@@ -8,16 +8,20 @@ Coverage:
 - Forecasting endpoints: 404 on empty cache, 200 when cache populated.
 - Batch task helper: _upsert_forecast writes to DB correctly.
 """
-import pytest
 from datetime import date, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app import db as _db
+from app.forecasting.engine import ForecastResult, detect_regime, run_forecast
 from app.models import (
-    Base, ForecastCache, DailySkuSummary, DailyStoreSummary, Product,
+    Base,
+    DailySkuSummary,
+    DailyStoreSummary,
+    ForecastCache,
+    Product,
 )
-from app.forecasting.engine import detect_regime, run_forecast, ForecastResult
-
 
 # ── Regime detection (pure, no DB) ───────────────────────────────────────────
 
@@ -133,7 +137,7 @@ class TestRunForecast:
                       forecast_mean=99.0, lower_bound=80.0, upper_bound=120.0)
             for i in range(7)
         ]
-        mock_result = ForecastResult(
+        ForecastResult(
             points=mock_points,
             regime='Stable',
             model_type='prophet',
@@ -249,7 +253,7 @@ class TestForecastingEndpoints:
         resp = client.get(f'/api/v1/forecasting/sku/{test_product.product_id}', headers=owner_headers)
         data = resp.get_json()['data']
         meta = resp.get_json()['meta']
-        
+
         assert meta['confidence_tier'] == 'ridge'
         assert len(data['historical']) == 20
         for pt in data['forecast']:
@@ -273,7 +277,7 @@ class TestForecastingEndpoints:
         resp = client.get(f'/api/v1/forecasting/sku/{test_product.product_id}', headers=owner_headers)
         data = resp.get_json()['data']
         meta = resp.get_json()['meta']
-        
+
         assert meta['confidence_tier'] == 'flat'
         assert len(data['historical']) == 5
         for pt in data['forecast']:
@@ -287,9 +291,10 @@ class TestForecastingEndpoints:
 class TestUpsertForecast:
     def test_forecast_cache_populated(self, app, test_store, test_product):
         """Simulate the _upsert_forecast helper writing to forecast_cache."""
-        from app.tasks.tasks import _upsert_forecast, HORIZON_DAYS
-        from app.forecasting.engine import ForecastPoint, ForecastResult
         import datetime
+
+        from app.forecasting.engine import ForecastPoint, ForecastResult
+        from app.tasks.tasks import HORIZON_DAYS, _upsert_forecast
 
         today = datetime.date.today()
         points = [
@@ -327,9 +332,10 @@ class TestUpsertForecast:
 
     def test_upsert_idempotent(self, app, test_store, test_product):
         """Calling _upsert_forecast twice for the same dates should not duplicate rows."""
-        from app.tasks.tasks import _upsert_forecast
-        from app.forecasting.engine import ForecastPoint, ForecastResult
         import datetime
+
+        from app.forecasting.engine import ForecastPoint, ForecastResult
+        from app.tasks.tasks import _upsert_forecast
 
         today = datetime.date.today()
         points = [
@@ -375,8 +381,9 @@ class TestEventRegressors:
     @staticmethod
     def _make_store_user_product(app_ctx):
         """Create an isolated Store + User + Product and return (store, user, product)."""
-        from app.models import Store, User, Product
         import uuid
+
+        from app.models import Store, User
         store = Store(store_name=f"EvStore-{uuid.uuid4().hex[:6]}", currency_symbol="USD")
         _db.session.add(store)
         _db.session.commit()

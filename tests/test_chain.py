@@ -1,18 +1,24 @@
 """
 tests/test_chain.py — Chain Ownership & Multi-store Integration Tests
 """
-import pytest
 import uuid
 from datetime import date
 
-from app import db
-from app.models import (
-    Store, StoreGroup, StoreGroupMembership,
-    ChainDailyAggregate, InterStoreTransferSuggestion,
-    Alert, Product, DailyStoreSummary, Category
-)
-from app.auth.utils import generate_access_token
+import pytest
 
+from app import db
+from app.auth.utils import generate_access_token
+from app.models import (
+    Alert,
+    Category,
+    ChainDailyAggregate,
+    DailyStoreSummary,
+    InterStoreTransferSuggestion,
+    Product,
+    Store,
+    StoreGroup,
+    StoreGroupMembership,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures

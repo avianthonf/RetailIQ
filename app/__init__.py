@@ -1,18 +1,19 @@
-from flask import Flask, jsonify, request
-from flask_sqlalchemy import SQLAlchemy
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_cors import CORS
-from celery import Celery
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
-from dotenv import load_dotenv
+import logging
 import os
 import re
 import sys
 import time
-import logging
+
 import redis as redis_lib
+from celery import Celery
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from dotenv import load_dotenv
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 
 db = SQLAlchemy()
@@ -274,28 +275,29 @@ def create_app(config=None):
     celery_app.conf.update(app.config)
 
     # Register blueprints
-    from .auth import auth_bp
-    from .team import team_bp
-    from .store import store_bp
-    from .transactions import transactions_bp
-    from .inventory import inventory_bp
-    from .customers import customers_bp
     from app.analytics import analytics_bp
-    from app.forecasting import forecasting_bp
     from app.decisions import decisions_bp
+    from app.forecasting import forecasting_bp
     from app.nlp import nlp_bp
-    from .models import models_bp
-    from .receipts import receipts_bp
-    from .suppliers.routes import suppliers_bp
-    from .staff_performance import staff_performance_bp
-    from .offline import offline_bp
-    from .loyalty import loyalty_bp
-    from .gst import gst_bp
-    from .whatsapp import whatsapp_bp
+
+    from .auth import auth_bp
     from .chain import chain_bp
-    from .pricing import pricing_bp
+    from .customers import customers_bp
     from .events import events_bp
+    from .gst import gst_bp
+    from .inventory import inventory_bp
+    from .loyalty import loyalty_bp
+    from .models import models_bp
+    from .offline import offline_bp
+    from .pricing import pricing_bp
+    from .receipts import receipts_bp
+    from .staff_performance import staff_performance_bp
+    from .store import store_bp
+    from .suppliers.routes import suppliers_bp
+    from .team import team_bp
+    from .transactions import transactions_bp
     from .vision import vision_bp
+    from .whatsapp import whatsapp_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(team_bp, url_prefix='/api/v1/team')

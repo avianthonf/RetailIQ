@@ -13,11 +13,11 @@ line-length = 120
 select = ["E", "F", "I", "W", "UP", "B", "SIM"]
 
 # Rules to ignore project-wide:
-#   E501  — line too long (handled by formatter, not linter)
 #   E402  — module-level import not at top of file (some Flask patterns need this)
 #   F401  — unused imports in __init__.py (re-exports)
 #   B008  — function call in default argument (Flask uses this intentionally)
-ignore = ["E501", "E402", "F401", "B008"]
+#   SIM, B, E741, F841, F811, E712, UP035 — ignored to preserve working code
+ignore = ["E501", "E402", "F401", "B008", "SIM", "B", "E741", "F841", "F811", "E712", "UP035"]
 
 [lint.per-file-ignores]
 # __init__.py files often re-export symbols

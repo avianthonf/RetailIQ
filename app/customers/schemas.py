@@ -1,6 +1,6 @@
-from marshmallow import Schema, fields, validate, validates, ValidationError
 import re
 
+from marshmallow import Schema, ValidationError, fields, validate, validates
 
 MOBILE_RE = re.compile(r'^\d{10,15}$')
 

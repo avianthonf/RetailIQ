@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from flask import jsonify, request, g, Blueprint
+from flask import Blueprint, g, jsonify, request
 from sqlalchemy import text
 
 from app import db
@@ -29,7 +29,7 @@ def _rows_to_points(rows) -> list[dict]:
         return []
     m_type = getattr(rows[0], 'model_type', 'flat')
     is_prophet = (m_type == 'prophet')
-    
+
     return [
         {
             'date':          str(r.forecast_date),
@@ -83,7 +83,7 @@ def forecast_store_endpoint():
     window = getattr(rows[0], 'training_window_days', 30)
     if not isinstance(window, int) or window <= 0:
         window = 30
-        
+
     hist_start = today - timedelta(days=window)
     hist_rows = db.session.execute(text("""
         SELECT date, units_sold
@@ -91,7 +91,7 @@ def forecast_store_endpoint():
         WHERE store_id = :sid AND date > :hist_start AND date <= :today
         ORDER BY date ASC
     """), {'sid': sid, 'hist_start': str(hist_start), 'today': str(today)}).fetchall()
-    
+
     historical = [{'date': str(r.date), 'actual': float(r.units_sold or 0)} for r in hist_rows]
 
     meta = {
@@ -165,7 +165,7 @@ def forecast_sku_endpoint(product_id: int):
     window = getattr(rows[0], 'training_window_days', 30)
     if not isinstance(window, int) or window <= 0:
         window = 30
-        
+
     hist_start = today - timedelta(days=window)
     hist_rows = db.session.execute(text("""
         SELECT date, units_sold
@@ -173,7 +173,7 @@ def forecast_sku_endpoint(product_id: int):
         WHERE store_id = :sid AND product_id = :pid AND date > :hist_start AND date <= :today
         ORDER BY date ASC
     """), {'sid': sid, 'pid': product_id, 'hist_start': str(hist_start), 'today': str(today)}).fetchall()
-    
+
     historical = [{'date': str(r.date), 'actual': float(r.units_sold or 0)} for r in hist_rows]
 
     # Reorder suggestion

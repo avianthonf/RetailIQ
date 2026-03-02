@@ -11,15 +11,22 @@ Coverage:
 - Dashboard: correct structure, no raw-table scans (only agg tables queried)
 - Cold-start: endpoints with < 7 days of data return partial MAs
 """
-import pytest
 from datetime import date, timedelta
+
+import pytest
 
 from app import db as _db
 from app.models import (
-    Base, DailyStoreSummary, DailySkuSummary, DailyCategorySummary,
-    Alert, Category, Product, Transaction, TransactionItem,
+    Alert,
+    Base,
+    Category,
+    DailyCategorySummary,
+    DailySkuSummary,
+    DailyStoreSummary,
+    Product,
+    Transaction,
+    TransactionItem,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,7 +89,7 @@ class TestRevenueEndpoint:
         _seed_store_summary(test_store.store_id, start, 10, base_rev=1000.0)
 
         resp = client.get(
-            f'/api/v1/analytics/revenue?start=2024-01-01&end=2024-01-10',
+            '/api/v1/analytics/revenue?start=2024-01-01&end=2024-01-10',
             headers=owner_headers,
         )
         assert resp.status_code == 200
@@ -248,7 +255,6 @@ class TestCategoryBreakdown:
 class TestContributionEndpoint:
     def test_contribution_pareto_flag(self, client, owner_headers, test_store, test_product, test_category):
         """Create 5 SKUs; top 20% (1 SKU) should have is_pareto=True."""
-        products = [test_product]
         for i in range(4):
             p = Product(
                 store_id=test_store.store_id,
@@ -288,9 +294,9 @@ class TestContributionEndpoint:
 
         # Same exact revenue in compare period → delta ≈ 0
         resp = client.get(
-            f'/api/v1/analytics/contribution'
-            f'?start=2024-09-01&end=2024-09-05'
-            f'&compare_start=2024-09-01&compare_end=2024-09-05',
+            '/api/v1/analytics/contribution'
+            '?start=2024-09-01&end=2024-09-05'
+            '&compare_start=2024-09-01&compare_end=2024-09-05',
             headers=owner_headers,
         )
         assert resp.status_code == 200
@@ -434,7 +440,7 @@ class TestDashboardEndpoint:
         data = resp.get_json()['data']
         rev_7d = data['revenue_7d']
         assert len(rev_7d) == 7
-        
+
         # Day -3 should have 200, Day 0 should have 100, others 0
         missing_days = [r for r in rev_7d if r['date'] not in (str(today), str(today - timedelta(days=3)))]
         assert len(missing_days) == 5
@@ -453,11 +459,11 @@ class TestDashboardEndpoint:
 
         resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
         data = resp.get_json()['data']
-        
+
         assert 'category_breakdown' in data
         cats = data['category_breakdown']
         assert len(cats) >= 2
-        
+
         # Verify sorted descending
         revenues = [c['revenue'] for c in cats]
         assert revenues == sorted(revenues, reverse=True)
@@ -467,6 +473,6 @@ class TestDashboardEndpoint:
         """Ensure the response includes payment_mode_breakdown."""
         resp = client.get('/api/v1/analytics/dashboard', headers=owner_headers)
         data = resp.get_json()['data']
-        
+
         assert 'payment_mode_breakdown' in data
         assert isinstance(data['payment_mode_breakdown'], list)

@@ -1,5 +1,6 @@
 from marshmallow import Schema, fields, validate
 
+
 class WhatsAppConfigUpsertSchema(Schema):
     phone_number_id = fields.String(required=False, allow_none=True)
     access_token = fields.String(required=False, allow_none=True)

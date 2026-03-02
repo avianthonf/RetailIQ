@@ -1,11 +1,11 @@
-import pytest
 from datetime import date, timedelta
-from app.decisions.engine import evaluate_rules, build_context
-from app.decisions.rules import (
-    reorder_alert, safety_stock_reorder, slow_mover,
-    revenue_drop, high_margin_opportunity
-)
+
+import pytest
+
+from app.decisions.engine import build_context, evaluate_rules
 from app.decisions.helpers import get_zero_filled_history
+from app.decisions.rules import high_margin_opportunity, reorder_alert, revenue_drop, safety_stock_reorder, slow_mover
+
 
 # --- Helper / Math Tests ---
 def test_zero_filled_history():
@@ -14,7 +14,7 @@ def test_zero_filled_history():
         {"date": date(2023, 10, 20), "units_sold": 5},
         {"date": date(2023, 10, 25), "units_sold": 10},
     ] # Gap between 20th and 25th, and up to 30th
-    
+
     # 30 day sequence from 10/01 to 10/30 (excluding today 10/31)
     history = get_zero_filled_history(raw, today, window=30, metric="units_sold")
     assert len(history) == 30
@@ -40,7 +40,7 @@ def test_reorder_alert_not_enough_history():
     ctx = {
         "product_id": 1,
         "current_stock": 10.0, "lead_time_days": 3, "forecast_demand_7d": 15.0,
-        "regime": "Stable", 
+        "regime": "Stable",
         "units_sold_30d": [5.0]*10, # < 14 days
     }
     # Capped confidence 0.5 and skip reorder formula

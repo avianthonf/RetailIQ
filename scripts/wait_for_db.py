@@ -1,6 +1,6 @@
 import os
-import time
 import sys
+import time
 
 from sqlalchemy import create_engine, text
 

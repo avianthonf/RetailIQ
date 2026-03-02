@@ -1,5 +1,6 @@
 from marshmallow import Schema, fields
 
+
 class CreateStoreGroupSchema(Schema):
     name = fields.String(required=True)
 

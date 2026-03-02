@@ -1,15 +1,27 @@
-from functools import wraps
 import uuid as _uuid
-from flask import request, jsonify, g
-from datetime import datetime, date, timedelta, timezone
-from sqlalchemy import func
-from app import db
-from app.auth.utils import format_response
-from app.auth.decorators import require_auth
-from app.models import Store, StoreGroup, StoreGroupMembership, ChainDailyAggregate, InterStoreTransferSuggestion, Alert, DailyStoreSummary
+from datetime import date, datetime, timedelta, timezone
+from functools import wraps
+
+from flask import g, jsonify, request
 from marshmallow import ValidationError
-from app.chain.schemas import CreateStoreGroupSchema, AddStoreToGroupSchema, ConfirmTransferSchema
+from sqlalchemy import func
+
+from app import db
+from app.auth.decorators import require_auth
+from app.auth.utils import format_response
+from app.chain.schemas import AddStoreToGroupSchema, ConfirmTransferSchema, CreateStoreGroupSchema
+from app.models import (
+    Alert,
+    ChainDailyAggregate,
+    DailyStoreSummary,
+    InterStoreTransferSuggestion,
+    Store,
+    StoreGroup,
+    StoreGroupMembership,
+)
+
 from . import chain_bp
+
 
 def require_chain_owner(f):
     @wraps(f)
@@ -28,7 +40,7 @@ def create_group():
         return format_response(False, error={"code": "VALIDATION_ERROR", "message": str(err)}), 400
 
     user_id = g.current_user['user_id']
-    
+
     # Check if user already owns a group
     existing = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
     if existing:
@@ -93,13 +105,13 @@ def chain_dashboard():
     ).all()
 
     total_rev = float(sum((agg.revenue or 0) for agg in aggs))
-    
+
     per_store = []
     for store_id in store_ids:
         store = db.session.query(Store).filter_by(store_id=store_id).first()
         agg = next((a for a in aggs if a.store_id == store_id), None)
         alert_count = db.session.query(Alert).filter_by(store_id=store_id, resolved_at=None).count()
-        
+
         per_store.append({
             "store_id": store_id,
             "name": store.store_name if store else f"Store {store_id}",
@@ -138,7 +150,7 @@ def chain_dashboard():
 def evaluate_chain_comparison():
     group_id = _uuid.UUID(g.current_user['chain_group_id'])
     period = request.args.get('period', 'today')
-    
+
     end_date = date.today()
     if period == 'week':
         start_date = end_date - timedelta(days=7)
@@ -170,7 +182,7 @@ def evaluate_chain_comparison():
     for store_id in store_ids:
         res = next((r for r in results if r.store_id == store_id), None)
         rev = float(res.total_rev) if res and res.total_rev else 0.0
-        
+
         if avg_rev == 0:
             rel = 'near'
         elif rev > avg_rev * 1.05:
@@ -205,7 +217,7 @@ def get_transfers():
         "reason": s.reason,
         "status": s.status
     } for s in suggestions]
-    
+
     return format_response(True, data=transfers)
 
 
@@ -214,7 +226,7 @@ def get_transfers():
 @require_chain_owner
 def confirm_transfer(transfer_id):
     group_id = _uuid.UUID(g.current_user['chain_group_id'])
-    
+
     suggestion = db.session.query(InterStoreTransferSuggestion).filter_by(id=transfer_id, group_id=group_id).first()
     if not suggestion:
         return format_response(False, error={"code": "NOT_FOUND", "message": "Transfer suggestion not found"}), 404

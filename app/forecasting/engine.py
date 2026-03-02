@@ -103,11 +103,10 @@ def _linear_regression_forecast(
     Target: units_sold.
     Returns forecast points with symmetric PI based on residual std.
     """
-    from sklearn.linear_model import Ridge
-    from sklearn.preprocessing import OneHotEncoder
-    from sklearn.pipeline import make_pipeline
     from sklearn.compose import ColumnTransformer
-    from sklearn.pipeline import Pipeline
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import Pipeline, make_pipeline
+    from sklearn.preprocessing import OneHotEncoder
 
     df = history.copy().sort_values('ds')
     df['days_since_start'] = (df['ds'] - df['ds'].min()).dt.days
@@ -244,7 +243,7 @@ def _prophet_forecast(
         mean    = max(0.0, float(row['yhat']))
         lb      = max(0.0, float(row['yhat_lower']))
         ub      = max(0.0, float(row['yhat_upper']))
-        
+
         # Determine base forecast
         extra_regressors = float(row.get('extra_regressors_additive', 0.0))
         base_forecast = max(0.0, mean - extra_regressors)
@@ -326,10 +325,12 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
     Senses demand for a specific product, integrating historical sales and future events.
     Writes the forecast snapshot to demand_sensing_log and returns the JSON payload.
     """
-    from sqlalchemy import text
-    from datetime import datetime, timezone
-    from app.models import DemandSensingLog, BusinessEvent
     import uuid
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    from app.models import BusinessEvent, DemandSensingLog
 
     cutoff_90 = datetime.now(timezone.utc).date() - timedelta(days=90)
     horizon_date = datetime.now(timezone.utc).date() + timedelta(days=horizon)
@@ -368,7 +369,7 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
             'expected_impact_pct': e.expected_impact_pct,
             'event_type': e.event_type
         })
-    
+
     # 3. Run forecast
     result = run_forecast(dates, values, horizon=horizon, interval_width=0.80, events=events_list)
 
@@ -392,7 +393,7 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
             active_events=active_payload
         )
         session.add(log_entry)
-        
+
         active_payload_list.append({
             "date": fp.forecast_date.isoformat(),
             "base_forecast": fp.base_forecast,

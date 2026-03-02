@@ -6,7 +6,8 @@ All tasks use DB/Redis for guarantees, are idempotent, retry-able.
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone, date as date_type
+from datetime import date as date_type
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import redis as redis_lib
@@ -14,8 +15,9 @@ from celery import shared_task
 from celery.utils.log import get_task_logger
 from sqlalchemy import text
 
-from .db_session import task_session
 from app.models import AnalyticsSnapshot
+
+from .db_session import task_session
 
 logger = get_task_logger(__name__)
 
@@ -201,7 +203,8 @@ def _upsert_alert(session, store_id, alert_type, priority, product_id, message, 
             "product_id": product_id, "date_bucket": str(date_bucket),
         }).fetchone()
 
-    if existing: return False
+    if existing:
+        return False
 
     session.execute(text("""
         INSERT INTO alerts (store_id, alert_type, priority, product_id, message, created_at)
@@ -223,7 +226,8 @@ def _upsert_alert(session, store_id, alert_type, priority, product_id, message, 
 def evaluate_alerts(self, store_id: int):
     lock_key = f"lock:eval_alerts:{store_id}"
     with _RedisLock(lock_key, ttl=600) as acquired:
-        if not acquired: return
+        if not acquired:
+            return
 
         today = date_type.today()
         new_alerts = 0
@@ -343,16 +347,16 @@ def _fetch_sku_history(session, store_id: int, product_id: int):
         WHERE store_id = :sid AND product_id = :pid
         ORDER BY date ASC
     """), {"sid": store_id, "pid": product_id}).fetchall()
-    
+
     if not rows:
         return [], []
-        
+
     # Zero-fill missing dates for continuous time series
     from datetime import timedelta
     date_dict = {_coerce_to_date(r.date): float(r.units_sold or 0) for r in rows}
     start_date = _coerce_to_date(rows[0].date)
     end_date = _coerce_to_date(rows[-1].date)
-    
+
     filled_dates = []
     filled_values = []
     curr = start_date
@@ -360,7 +364,7 @@ def _fetch_sku_history(session, store_id: int, product_id: int):
         filled_dates.append(curr)
         filled_values.append(date_dict.get(curr, 0.0))
         curr += timedelta(days=1)
-        
+
     return filled_dates, filled_values
 
 
@@ -372,16 +376,16 @@ def _fetch_store_history(session, store_id: int):
         WHERE store_id = :sid
         ORDER BY date ASC
     """), {"sid": store_id}).fetchall()
-    
+
     if not rows:
         return [], []
-        
+
     # Zero-fill missing dates for continuous time series
     from datetime import timedelta
     date_dict = {_coerce_to_date(r.date): float(r.revenue or 0) for r in rows}
     start_date = _coerce_to_date(rows[0].date)
     end_date = _coerce_to_date(rows[-1].date)
-    
+
     filled_dates = []
     filled_values = []
     curr = start_date
@@ -389,7 +393,7 @@ def _fetch_store_history(session, store_id: int):
         filled_dates.append(curr)
         filled_values.append(date_dict.get(curr, 0.0))
         curr += timedelta(days=1)
-        
+
     return filled_dates, filled_values
 
 
@@ -500,7 +504,8 @@ def forecast_store(self, store_id: int):
 def run_batch_forecasting(self):
     lock_key = f"lock:batch_forecast:{date_type.today()}"
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
+        if not acquired:
+            return
         batch_size = 50
         offset = 0
         with task_session() as session:
@@ -509,7 +514,8 @@ def run_batch_forecasting(self):
                     text("SELECT store_id FROM stores ORDER BY store_id LIMIT :limit OFFSET :offset"),
                     {"limit": batch_size, "offset": offset}
                 ).fetchall()
-                if not stores: break
+                if not stores:
+                    break
                 for s in stores:
                     forecast_store.delay(s.store_id)
                 offset += batch_size
@@ -524,7 +530,8 @@ def run_batch_forecasting(self):
 def detect_slow_movers(self):
     lock_key = f"lock:slow_movers:{date_type.today()}"
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
+        if not acquired:
+            return
 
         today = date_type.today()
         week_start = today - timedelta(days=today.weekday())
@@ -555,7 +562,8 @@ def detect_slow_movers(self):
 def send_weekly_digest(self):
     lock_key = f"lock:digest:{date_type.today()}"
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
+        if not acquired:
+            return
         today = date_type.today()
         week_start = today - timedelta(days=7)
 
@@ -566,8 +574,8 @@ def send_weekly_digest(self):
                     SELECT COALESCE(SUM(revenue), 0) AS revenue FROM daily_store_summary
                     WHERE store_id = :sid AND date >= :start AND date < :today
                 """), {"sid": s.store_id, "start": str(week_start), "today": str(today)}).fetchone()
-                
-                top_skus = session.execute(text("""
+
+                session.execute(text("""
                     SELECT p.name, SUM(dss.revenue) AS rev FROM daily_sku_summary dss
                     JOIN products p ON p.product_id = dss.product_id
                     WHERE dss.store_id = :sid AND dss.date >= :start AND dss.date < :today
@@ -584,10 +592,11 @@ def send_weekly_digest(self):
 def check_overdue_purchase_orders(self):
     lock_key = f"lock:overdue_po:{date_type.today()}"
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
-        
+        if not acquired:
+            return
+
         today = date_type.today()
-        
+
         with task_session() as session:
             overdue_pos = session.execute(text("""
                 SELECT po.id, po.store_id, po.expected_delivery_date, s.name as supplier_name
@@ -596,12 +605,12 @@ def check_overdue_purchase_orders(self):
                 WHERE po.status = 'SENT'
                   AND po.expected_delivery_date < :today
             """), {"today": str(today)}).fetchall()
-            
+
             for row in overdue_pos:
                 n_days = (today - _coerce_to_date(row.expected_delivery_date)).days
                 msg = f"PO #{row.id} from {row.supplier_name} is overdue by {n_days} days."
                 _upsert_alert(session, row.store_id, 'OVERDUE_PO', 'MEDIUM', None, msg, today)
-                
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 7. auto_close_open_sessions (Staff Performance)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -611,10 +620,11 @@ def auto_close_open_sessions(self):
     """Daily job. Closes all OPEN staff sessions older than 16 hours."""
     lock_key = f"lock:auto_close_sessions:{date_type.today()}"
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
-        
+        if not acquired:
+            return
+
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=16)
-        
+
         with task_session() as session:
             # We use ORM syntax or raw SQL, let's use raw SQL for consistency here
             session.execute(text("""
@@ -622,7 +632,7 @@ def auto_close_open_sessions(self):
                 SET status = 'CLOSED', ended_at = CURRENT_TIMESTAMP
                 WHERE status = 'OPEN' AND started_at < :cutoff
             """), {"cutoff": str(cutoff_time)})
-            
+
             _log('auto_close_open_sessions', cutoff=cutoff_time.isoformat())
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -634,10 +644,11 @@ def generate_staff_daily_summary(self):
     """Daily. Computes yesterday's actual vs target for each staff, stores in Redis cache."""
     yesterday = date_type.today() - timedelta(days=1)
     lock_key = f"lock:generate_staff_summary:{yesterday}"
-    
+
     with _RedisLock(lock_key, ttl=3600) as acquired:
-        if not acquired: return
-        
+        if not acquired:
+            return
+
         with task_session() as session:
             # Get all targets for yesterday
             targets = session.execute(text("""
@@ -646,20 +657,20 @@ def generate_staff_daily_summary(self):
                 JOIN users u ON t.user_id = u.user_id
                 WHERE t.target_date = :yesterday
             """), {"yesterday": str(yesterday)}).fetchall()
-            
+
             r = _redis_client()
-            
+
             for row in targets:
                 # Calculate actuals from yesterday logic
                 # Transactions done by user OR in session owned by user
                 actuals = session.execute(text("""
-                    SELECT 
+                    SELECT
                         COUNT(DISTINCT t.transaction_id) as txn_count,
                         COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0) as revenue
                     FROM transactions t
                     JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
                     LEFT JOIN staff_sessions ss ON t.session_id = ss.id
-                    WHERE t.store_id = :store_id 
+                    WHERE t.store_id = :store_id
                       AND t.is_return = FALSE
                       AND DATE(t.created_at) = :yesterday
                       AND ss.user_id = :user_id
@@ -668,7 +679,7 @@ def generate_staff_daily_summary(self):
                     "yesterday": str(yesterday),
                     "user_id": row.user_id
                 }).fetchone()
-                
+
                 summary = {
                     "user_id": row.user_id,
                     "name": row.full_name or row.mobile_number,
@@ -678,12 +689,12 @@ def generate_staff_daily_summary(self):
                     "actual_revenue": float(actuals.revenue) if actuals else 0.0,
                     "actual_txns": int(actuals.txn_count) if actuals else 0
                 }
-                
+
                 cache_key = f"staff_summary:{row.store_id}:{yesterday}"
                 r.hset(cache_key, str(row.user_id), json.dumps(summary))
                 # Expire in 30 days
                 r.expire(cache_key, 86400 * 30)
-                
+
             _log('generate_staff_daily_summary', summary_date=str(yesterday), count=len(targets))
 
 @shared_task(name="tasks.build_analytics_snapshot", bind=True, max_retries=3)
@@ -694,11 +705,11 @@ def build_analytics_snapshot(self, store_id):
     logger.info(f"Building analytics snapshot for store_id={store_id}")
     with task_session() as db:
         from app.offline.builder import build_snapshot
-        
+
         try:
             snapshot_data = build_snapshot(store_id, db)
             serialized_len = len(json.dumps(snapshot_data).encode('utf-8'))
-            
+
             # Upsert
             existing = db.query(AnalyticsSnapshot).filter_by(store_id=store_id).first()
             if existing:
@@ -713,7 +724,7 @@ def build_analytics_snapshot(self, store_id):
                     size_bytes=serialized_len
                 )
                 db.add(new_snap)
-                
+
             db.commit()
             _log('build_analytics_snapshot', store_id=store_id, size=serialized_len)
         except Exception as e:
@@ -726,10 +737,11 @@ def build_all_analytics_snapshots():
     """Triggers snapshot generation for all active stores."""
     logger.info("Starting batch analytics snapshots generation")
     with task_session() as db:
-        stores = db.session.query(Store).filter(Store.is_active == True).all()
+        from app.models import Store
+        stores = db.session.query(Store).filter(Store.is_active is True).all()
         for store in stores:
             build_analytics_snapshot.delay(store.store_id)
-            
+
     _log('build_all_analytics_snapshots', count=len(stores))
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -738,8 +750,9 @@ def build_all_analytics_snapshots():
 @shared_task(name="tasks.expire_loyalty_points", bind=True, max_retries=3)
 def expire_loyalty_points(self):
     """Monthly task on the 1st: expire points older than expiry_days due to inactivity."""
-    from app.models import LoyaltyProgram, CustomerLoyaltyAccount, LoyaltyTransaction
     from decimal import Decimal
+
+    from app.models import CustomerLoyaltyAccount, LoyaltyProgram, LoyaltyTransaction
     with task_session() as session:
         programs = session.query(LoyaltyProgram).filter_by(is_active=True).all()
         for prog in programs:
@@ -752,12 +765,12 @@ def expire_loyalty_points(self):
                     continue
                 if acc.last_activity_at is None or acc.last_activity_at >= expiry_date:
                     continue
-                
+
                 expired_points = Decimal(str(acc.redeemable_points))
                 acc.total_points = Decimal(str(acc.total_points)) - expired_points
                 acc.redeemable_points = 0
                 acc.last_activity_at = datetime.utcnow()
-                
+
                 ltxn = LoyaltyTransaction(
                     account_id=acc.id,
                     type='EXPIRE',
@@ -805,8 +818,10 @@ def credit_overdue_alerts(self):
 @shared_task(name="tasks.compile_monthly_gst", bind=True, max_retries=3)
 def compile_monthly_gst(self, store_id, period):
     """Monthly task: aggregate gst_transactions into a gst_filing_period and generate GSTR-1 JSON."""
-    import json, os
-    from app.models import GSTTransaction, GSTFilingPeriod, StoreGSTConfig, Store
+    import json
+    import os
+
+    from app.models import GSTFilingPeriod, GSTTransaction, Store, StoreGSTConfig
 
     with task_session() as session:
         gst_txns = session.query(GSTTransaction).filter_by(store_id=store_id, period=period).all()
@@ -892,10 +907,7 @@ def compile_monthly_gst(self, store_id, period):
 @shared_task(name="tasks.update_gst_transactions_task", bind=True, max_retries=3)
 def update_gst_transactions_task(self):
     """Sweep for transactions in the current period missing GST rows and backfill them."""
-    from app.models import (
-        Transaction, TransactionItem, Product, StoreGSTConfig,
-        GSTTransaction, HSNMaster, Category
-    )
+    from app.models import Category, GSTTransaction, HSNMaster, Product, StoreGSTConfig, Transaction, TransactionItem
 
     with task_session() as session:
         current_period = datetime.utcnow().strftime('%Y-%m')
@@ -914,7 +926,7 @@ def update_gst_transactions_task(self):
             txns = session.query(Transaction).filter(
                 Transaction.store_id == store_id,
                 Transaction.created_at >= datetime.strptime(current_period + '-01', '%Y-%m-%d'),
-                Transaction.is_return == False,
+                Transaction.is_return is False,
                 ~Transaction.transaction_id.in_(existing_gst_txn_ids)
             ).all()
 
@@ -996,6 +1008,8 @@ def aggregate_chain_daily_all_groups(self):
         for g in groups:
             aggregate_chain_daily.delay(str(g.id))
 
+import uuid as _uuid
+
 
 @shared_task(bind=True, name='tasks.aggregate_chain_daily', max_retries=3)
 def aggregate_chain_daily(self, group_id_str):
@@ -1030,7 +1044,7 @@ def aggregate_chain_daily(self, group_id_str):
                     ON CONFLICT (group_id, store_id, date)
                     DO UPDATE SET revenue = EXCLUDED.revenue, profit = EXCLUDED.profit, transaction_count = EXCLUDED.transaction_count
                 """), {
-                    "id": str(uuid.uuid4()),
+                    "id": str(_uuid.uuid4()),
                     "gid": group_id_str,
                     "sid": m.store_id,
                     "tdate": str(today),
@@ -1117,7 +1131,7 @@ def detect_transfer_opportunities(self, group_id_str):
                         (id, group_id, from_store_id, to_store_id, product_id, suggested_qty, reason)
                     VALUES (:id, :gid, :from_store, :to_store, :pid, :qty, :reason)
                 """), {
-                    "id": str(uuid.uuid4()),
+                    "id": str(_uuid.uuid4()),
                     "gid": group_id_str,
                     "from_store": best_target.store_id,
                     "to_store": short_store,
@@ -1232,75 +1246,77 @@ def process_ocr_job(self, job_id: str):
     Process an uploaded invoice image via OCR.
     Extract items, match products via pg_trgm, and transition job to REVIEW.
     """
+    import uuid
+
     import pytesseract
     from PIL import Image
-    import uuid
+
     from app.vision.parser import parse_invoice_text
-    
+
     _log('process_ocr_job', job_id=job_id, status='started')
-    
+
     with task_session() as session:
         # Load job
         job_row = session.execute(
             text("SELECT * FROM ocr_jobs WHERE id = :jid FOR UPDATE"),
             {"jid": job_id}
         ).fetchone()
-        
+
         if not job_row:
             _log('process_ocr_job', job_id=job_id, error='Job not found')
             return
-            
+
         if job_row.status not in ('QUEUED',):
             _log('process_ocr_job', job_id=job_id, error='Job not QUEUED')
             return
-            
+
         # Mark PROCESSING
         session.execute(
             text("UPDATE ocr_jobs SET status = 'PROCESSING' WHERE id = :jid"),
             {"jid": job_id}
         )
         session.commit()
-        
+
     # Execute OCR and processing safely
     try:
         image_path = job_row.image_path
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Image not found at {image_path}")
-            
+
         img = Image.open(image_path)
         raw_text = pytesseract.image_to_string(img, config='--psm 6')
-        
+
         parsed_items = parse_invoice_text(raw_text)
-        
+
         with task_session() as session:
             # 1. Update job with raw_text
             session.execute(
                 text("UPDATE ocr_jobs SET raw_ocr_text = :text WHERE id = :jid"),
                 {"text": raw_text, "jid": job_id}
             )
-            
+
             # 2. Match products and insert line items
             for item in parsed_items:
                 product_name = item['product_name']
-                
+
                 # Try to fuzzy match
                 match = session.execute(
                     text("""
-                        SELECT product_id, similarity(product_name, :search) as sim 
-                        FROM products 
-                        WHERE store_id = :sid AND similarity(product_name, :search) > 0.4 
+                        SELECT product_id, similarity(product_name, :search) as sim
+                        FROM products
+                        WHERE store_id = :sid AND similarity(product_name, :search) > 0.4
                         ORDER BY sim DESC LIMIT 1
                     """),
                     {"search": product_name, "sid": job_row.store_id}
                 ).fetchone()
-                
+
                 matched_id = match.product_id if match else None
                 confidence = float(match.sim) if match else 0.0
-                
+
                 item_id = str(uuid.uuid4())
                 session.execute(
                     text("""
-                        INSERT INTO ocr_job_items 
+                        INSERT INTO ocr_job_items
                         (id, job_id, raw_text, matched_product_id, confidence, quantity, unit_price, is_confirmed)
                         VALUES (:id, :jid, :rtext, :mid, :conf, :qty, :price, FALSE)
                     """),
@@ -1314,16 +1330,16 @@ def process_ocr_job(self, job_id: str):
                         "price": item['unit_price']
                     }
                 )
-                
+
             # 3. Mark job REVIEW
             session.execute(
                 text("UPDATE ocr_jobs SET status = 'REVIEW' WHERE id = :jid"),
                 {"jid": job_id}
             )
             session.commit()
-            
+
         _log('process_ocr_job', job_id=job_id, status='completed', items=len(parsed_items))
-        
+
     except Exception as e:
         logger.exception("OCR job failed")
         with task_session() as session:

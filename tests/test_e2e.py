@@ -15,22 +15,36 @@ or seed DB tables to simulate task output.
 
 import json
 import uuid
-from datetime import datetime, timezone, date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
 from app import db as _db
-from app.models import (
-    Store, User, Category, Product, Customer,
-    Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem,
-    GoodsReceiptNote, LoyaltyProgram, CustomerLoyaltyAccount,
-    StoreGSTConfig, HSNMaster, GSTTransaction, GSTFilingPeriod,
-    DailyStoreSummary, DailySkuSummary, DailyCategorySummary,
-    Alert, AnalyticsSnapshot,
-)
 from app.auth.utils import generate_access_token
-
+from app.models import (
+    Alert,
+    AnalyticsSnapshot,
+    Category,
+    Customer,
+    CustomerLoyaltyAccount,
+    DailyCategorySummary,
+    DailySkuSummary,
+    DailyStoreSummary,
+    GoodsReceiptNote,
+    GSTFilingPeriod,
+    GSTTransaction,
+    HSNMaster,
+    LoyaltyProgram,
+    Product,
+    PurchaseOrder,
+    PurchaseOrderItem,
+    Store,
+    StoreGSTConfig,
+    Supplier,
+    SupplierProduct,
+    User,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -336,7 +350,6 @@ def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, 
     """
     with app.app_context():
         headers = owner_headers
-        sid = test_store.store_id
 
         # Set up loyalty program
         resp = client.put("/api/v1/loyalty/program", headers=headers, json={

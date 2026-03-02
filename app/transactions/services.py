@@ -1,10 +1,11 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from .. import db
-from ..models import Transaction, TransactionItem, Product
-from app.tasks.tasks import rebuild_daily_aggregates, evaluate_alerts
 
+from app.tasks.tasks import evaluate_alerts, rebuild_daily_aggregates
+
+from .. import db
+from ..models import Product, Transaction, TransactionItem
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
 
         ledger.balance = Decimal(str(ledger.balance)) + Decimal(str(grand_total))
         ledger.updated_at = datetime.now(timezone.utc)
-        
+
         ctxn = CreditTransaction(
             ledger_id=ledger.id,
             transaction_id=txn.transaction_id,
@@ -105,7 +106,7 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
         db.session.add(ctxn)
 
     if customer_id:
-        from ..models import LoyaltyProgram, CustomerLoyaltyAccount, LoyaltyTransaction
+        from ..models import CustomerLoyaltyAccount, LoyaltyProgram, LoyaltyTransaction
         program = db.session.query(LoyaltyProgram).filter_by(store_id=store_id, is_active=True).first()
         if program:
             points_earned = Decimal(str(grand_total)) * Decimal(str(program.points_per_rupee))
@@ -115,12 +116,12 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
                     account = CustomerLoyaltyAccount(customer_id=customer_id, store_id=store_id)
                     db.session.add(account)
                     db.session.flush()
-                
+
                 account.total_points = Decimal(str(account.total_points)) + points_earned
                 account.redeemable_points = Decimal(str(account.redeemable_points)) + points_earned
                 account.lifetime_earned = Decimal(str(account.lifetime_earned)) + points_earned
                 account.last_activity_at = datetime.now(timezone.utc)
-                
+
                 ltxn = LoyaltyTransaction(
                     account_id=account.id,
                     transaction_id=txn.transaction_id,
@@ -132,7 +133,8 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
                 db.session.add(ltxn)
 
     # ── GST Transaction Recording ───────────────────────────────────
-    from ..models import StoreGSTConfig, GSTTransaction as GSTTxn, HSNMaster, Category
+    from ..models import Category, HSNMaster, StoreGSTConfig
+    from ..models import GSTTransaction as GSTTxn
     gst_config = db.session.query(StoreGSTConfig).filter_by(store_id=store_id, is_gst_enabled=True).first()
     if gst_config and gst_config.registration_type == 'REGULAR':
         hsn_breakdown = {}
@@ -175,7 +177,7 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
             # Intrastate: CGST = SGST = tax / 2
             cgst = tax / 2
             sgst = tax / 2
-            igst = Decimal('0')
+            Decimal('0')
 
             total_taxable += taxable
             total_cgst += cgst

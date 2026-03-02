@@ -12,11 +12,13 @@ Covers:
   7. test_build_receipt_payload_structure
 """
 import uuid
-import pytest
 from datetime import datetime, timezone
 
+import pytest
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+
 
 # ── SQLite compat for Postgres-specific types ─────────────────────────────
 @compiles(JSONB, "sqlite")
@@ -29,14 +31,19 @@ def _compile_uuid(type_, compiler, **kw):
 # ─────────────────────────────────────────────────────────────────────────
 
 from app import db
-from app.models import (
-    Store, User, Category, Product,
-    Barcode, ReceiptTemplate, PrintJob,
-    Transaction, TransactionItem,
-)
 from app.auth.utils import generate_access_token
+from app.models import (
+    Barcode,
+    Category,
+    PrintJob,
+    Product,
+    ReceiptTemplate,
+    Store,
+    Transaction,
+    TransactionItem,
+    User,
+)
 from app.receipts.formatter import build_receipt_payload
-
 
 # ===========================================================================
 # Fixtures

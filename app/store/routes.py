@@ -1,11 +1,11 @@
-from flask import Blueprint, request, g
+from flask import Blueprint, g, request
+from marshmallow import ValidationError
 from sqlalchemy import select
 
 from .. import db
-from ..models import Store, Category, Product
 from ..auth.decorators import require_auth, require_role
-from .schemas import StoreProfileSchema, CategorySchema, TaxConfigSchema
-from marshmallow import ValidationError
+from ..models import Category, Product, Store
+from .schemas import CategorySchema, StoreProfileSchema, TaxConfigSchema
 
 store_bp = Blueprint('store', __name__)
 

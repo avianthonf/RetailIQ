@@ -1,7 +1,10 @@
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import text
-from app.models import Product, Alert
+
+from app.models import Alert, Product
+
 
 def build_snapshot(store_id, db):
     """
@@ -22,14 +25,14 @@ def build_snapshot(store_id, db):
         "low_stock_products": [],
         "built_at": datetime.now(timezone.utc).isoformat()
     }
-    
+
     # Attempt to see if db is a raw session or Flask-SQLAlchemy db object
     session = getattr(db, 'session', db)
-    
+
     # 1. Gather KPIs (using simple store aggregates)
     today = datetime.now(timezone.utc).date()
     yesterday = today - timedelta(days=1)
-    
+
     try:
         # fetch today's summary (aggregate)
         today_row = session.execute(
@@ -40,7 +43,7 @@ def build_snapshot(store_id, db):
             snapshot["kpis"]["today_revenue"] = float(today_row.revenue or 0)
             snapshot["kpis"]["today_profit"] = float(today_row.profit or 0)
             snapshot["kpis"]["today_transactions"] = int(today_row.transaction_count or 0)
-            
+
         # fetch yesterday
         yesterday_row = session.execute(
             text("SELECT revenue FROM daily_store_summary WHERE store_id = :sid AND date = :d"),
@@ -48,7 +51,7 @@ def build_snapshot(store_id, db):
         ).fetchone()
         if yesterday_row:
             snapshot["kpis"]["yesterday_revenue"] = float(yesterday_row.revenue or 0)
-            
+
         # fetch this week
         week_start = today - timedelta(days=today.weekday())
         week_row = session.execute(
@@ -66,10 +69,10 @@ def build_snapshot(store_id, db):
         ).scalar()
         if month_row is not None:
             snapshot["kpis"]["this_month_revenue"] = float(month_row)
-            
-    except Exception as e:
+
+    except Exception:
         pass # Handle gracefully, defaulting to 0s
-        
+
     # 2. Daily revenue summary (30d)
     try:
         thirty_days_ago = today - timedelta(days=30)
@@ -77,7 +80,7 @@ def build_snapshot(store_id, db):
             text("SELECT date as summary_date, revenue, profit FROM daily_store_summary WHERE store_id = :sid AND date >= :start ORDER BY date DESC"),
             {"sid": store_id, "start": str(thirty_days_ago)}
         ).fetchall()
-        
+
         for row in rev_history:
             snapshot["revenue_30d"].append({
                 "date": str(row.summary_date),
@@ -92,16 +95,16 @@ def build_snapshot(store_id, db):
         seven_days_ago = today - timedelta(days=7)
         top_products = session.execute(
             text("""
-                SELECT p.product_id, p.name, COALESCE(SUM(dss.revenue), 0) as rev, COALESCE(SUM(dss.units_sold), 0) as units 
-                FROM daily_sku_summary dss 
-                JOIN products p ON dss.product_id = p.product_id 
-                WHERE dss.store_id = :sid AND dss.date >= :start 
-                GROUP BY p.product_id, p.name 
+                SELECT p.product_id, p.name, COALESCE(SUM(dss.revenue), 0) as rev, COALESCE(SUM(dss.units_sold), 0) as units
+                FROM daily_sku_summary dss
+                JOIN products p ON dss.product_id = p.product_id
+                WHERE dss.store_id = :sid AND dss.date >= :start
+                GROUP BY p.product_id, p.name
                 ORDER BY rev DESC LIMIT 5
             """),
             {"sid": store_id, "start": str(seven_days_ago)}
         ).fetchall()
-        
+
         for p in top_products:
             snapshot["top_products_7d"].append({
                 "product_id": str(p.product_id),
@@ -118,7 +121,7 @@ def build_snapshot(store_id, db):
             Alert.store_id == store_id,
             Alert.status == 'OPEN'
         ).order_by(Alert.created_at.desc()).limit(10).all()
-        
+
         for a in alerts:
             snapshot["alerts_open"].append({
                 "id": str(a.alert_id),
@@ -128,15 +131,15 @@ def build_snapshot(store_id, db):
             })
     except Exception:
         pass
-        
+
     # 5. Low Stock Products
     try:
         low_stock = session.query(Product).filter(
             Product.store_id == store_id,
             Product.current_stock <= Product.reorder_level,
-            Product.is_active == True
+            Product.is_active is True
         ).limit(100).all() # hard limit to keep size sane
-        
+
         for p in low_stock:
             snapshot["low_stock_products"].append({
                 "product_id": str(p.product_id),
@@ -153,7 +156,7 @@ def build_snapshot(store_id, db):
         # Truncate revenue to 14 days and top products to 3
         snapshot["revenue_30d"] = snapshot["revenue_30d"][:14]
         snapshot["top_products_7d"] = snapshot["top_products_7d"][:3]
-        
+
         # Optionally, truncate low stock if still too large, but 50KB is around 50,000 characters
         # which easily fits 14 days history, 3 products, 10 alerts, and maybe 100 low stock items.
         # Just to be extremely safe, we clamp low_stock too if needed
