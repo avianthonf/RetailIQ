@@ -22,7 +22,7 @@ The platform is designed to run locally and in containerized environments with P
 
 ## Table of Contents
 1. [System Overview](#system-overview)
-2. [Architecture End-to-End](#architecture-end-to-end)
+2. [Comprehensive System Architecture](#comprehensive-system-architecture)
 3. [Repository Map](#repository-map)
 4. [Request Lifecycle](#request-lifecycle)
 5. [Data Model Overview](#data-model-overview)
@@ -45,7 +45,7 @@ The platform is designed to run locally and in containerized environments with P
 22. [Testing Strategy](#testing-strategy)
 23. [CI/CD](#cicd)
 24. [Operations and Troubleshooting](#operations-and-troubleshooting)
-25. [How to Modify the System Safely](#how-to-modify-the-system-safely)
+25. [Comprehensive Developer and Engineer Guide](#comprehensive-developer-and-engineer-guide)
 26. [Production Readiness Checklist](#production-readiness-checklist)
 
 ---
@@ -71,7 +71,7 @@ RetailIQ is built as a Flask app using SQLAlchemy models and blueprint modules. 
 
 ---
 
-## Architecture End-to-End
+## Comprehensive System Architecture
 
 ### High-level Components
 - **Flask API (Gunicorn)**: serves REST endpoints.
@@ -674,7 +674,7 @@ docker-compose logs -f beat
 
 ---
 
-## How to Modify the System Safely
+## Comprehensive Developer and Engineer Guide
 
 ## 1) Adding a new endpoint
 - Create/extend module blueprint route.
