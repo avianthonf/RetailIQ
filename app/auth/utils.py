@@ -36,7 +36,7 @@ def generate_access_token(user_id, store_id, role):
         'store_id': store_id,
         'role': role,
         'iat': now.timestamp(),
-        'exp': (now + timedelta(hours=2)).timestamp()
+        'exp': (now + timedelta(days=180)).timestamp()
     }
 
     # Inject Chain claims

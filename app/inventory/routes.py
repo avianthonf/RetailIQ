@@ -478,3 +478,19 @@ def get_alerts():
         for a in alerts
     ]
     return format_response(True, data=data), 200
+
+
+@inventory_bp.route('/alerts/<int:alert_id>', methods=['DELETE'])
+@require_auth
+def dismiss_alert(alert_id):
+    from datetime import datetime, timezone
+    store_id = g.current_user['store_id']
+    alert = db.session.query(Alert).filter(
+        Alert.alert_id == alert_id,
+        Alert.store_id == store_id
+    ).first()
+    if not alert:
+        return format_response(False, error={"code": "NOT_FOUND", "message": "Alert not found"}), 404
+    alert.resolved_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return format_response(True, data={"message": "Alert dismissed"}), 200
