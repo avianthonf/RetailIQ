@@ -10,6 +10,7 @@ class ParsedLineItem(TypedDict):
     unit_price: float | None
     unit: str | None
 
+
 def parse_invoice_text(raw_text: str) -> list[ParsedLineItem]:
     """
     Parses OCR text of an invoice to extract line items.
@@ -19,13 +20,13 @@ def parse_invoice_text(raw_text: str) -> list[ParsedLineItem]:
     MAX_OCR_TEXT_LENGTH = 50_000
     raw_text = raw_text[:MAX_OCR_TEXT_LENGTH]
 
-    lines = raw_text.split('\n')
+    lines = raw_text.split("\n")
     results: list[ParsedLineItem] = []
 
     # Regex to capture things like: 5 pcs, 10.5 kg, 12 nos
-    qty_regex = re.compile(r'\b(\d+(?:\.\d+)?)\s*(pcs|kg|units|nos|g|ml|l|ltrs?)\b', re.IGNORECASE)
+    qty_regex = re.compile(r"\b(\d+(?:\.\d+)?)\s*(pcs|kg|units|nos|g|ml|l|ltrs?)\b", re.IGNORECASE)
     # Regex to capture things like: ₹1,200.50, Rs 500, Rs. 10
-    price_regex = re.compile(r'(?:₹|Rs\.?)\s*([\d,]+(?:\.\d+)?)', re.IGNORECASE)
+    price_regex = re.compile(r"(?:₹|Rs\.?)\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
 
     pending_name_parts = []
 
@@ -51,18 +52,18 @@ def parse_invoice_text(raw_text: str) -> list[ParsedLineItem]:
                     unit_val = qty_match.group(2).lower()
                 except ValueError:
                     pass
-                clean_line = clean_line.replace(qty_match.group(0), '')
+                clean_line = clean_line.replace(qty_match.group(0), "")
 
             if price_match:
-                price_str = price_match.group(1).replace(',', '')
+                price_str = price_match.group(1).replace(",", "")
                 with contextlib.suppress(ValueError):
                     price_val = float(price_str)
-                clean_line = clean_line.replace(price_match.group(0), '')
+                clean_line = clean_line.replace(price_match.group(0), "")
 
             # Clean remaining text for the name
-            name_on_line = re.sub(r'[^a-zA-Z0-9\s\-&]', ' ', clean_line).strip()
+            name_on_line = re.sub(r"[^a-zA-Z0-9\s\-&]", " ", clean_line).strip()
             # Remove multiple spaces
-            name_on_line = re.sub(r'\s+', ' ', name_on_line)
+            name_on_line = re.sub(r"\s+", " ", name_on_line)
 
             if name_on_line:
                 pending_name_parts.append(name_on_line)
@@ -72,20 +73,22 @@ def parse_invoice_text(raw_text: str) -> list[ParsedLineItem]:
             if not final_name:
                 final_name = "Unknown Product"
 
-            results.append({
-                "raw_text": line,
-                "product_name": final_name,
-                "quantity": qty_val,
-                "unit_price": price_val,
-                "unit": unit_val
-            })
+            results.append(
+                {
+                    "raw_text": line,
+                    "product_name": final_name,
+                    "quantity": qty_val,
+                    "unit_price": price_val,
+                    "unit": unit_val,
+                }
+            )
 
             # Reset after consumption
             pending_name_parts = []
         else:
             # Line without qty/price — accumulate as product name
-            clean_text = re.sub(r'[^a-zA-Z0-9\s\-&]', ' ', line).strip()
-            clean_text = re.sub(r'\s+', ' ', clean_text)
+            clean_text = re.sub(r"[^a-zA-Z0-9\s\-&]", " ", line).strip()
+            clean_text = re.sub(r"\s+", " ", clean_text)
 
             # Ignore very short noisy lines (e.g. single chars, strange puncs)
             if len(clean_text) >= 2:

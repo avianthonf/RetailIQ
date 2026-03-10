@@ -4,6 +4,7 @@ Pricing Engine for RetailIQ
 Generates margin-optimized pricing suggestions per store using
 90-day sales history from daily_sku_summary.
 """
+
 import logging
 import statistics
 from datetime import datetime, timedelta, timezone
@@ -15,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 # ── Tuning constants ──────────────────────────────────────────────────────────
-MIN_HISTORY_DAYS = 30          # minimum days of history to qualify
-ELASTICITY_WINDOW_DAYS = 90    # window for price elasticity proxy calc
-LOW_VELOCITY_DAYS = 14         # lookback for zero-velocity check
+MIN_HISTORY_DAYS = 30  # minimum days of history to qualify
+ELASTICITY_WINDOW_DAYS = 90  # window for price elasticity proxy calc
+LOW_VELOCITY_DAYS = 14  # lookback for zero-velocity check
 MARGIN_RAISE_THRESHOLD = 0.15  # < 15% margin → candidate for RAISE
 MARGIN_LOWER_THRESHOLD = 0.30  # > 30% margin → candidate for LOWER
-ELASTICITY_INELASTIC = -0.3    # proxy > -0.3 → demand inelastic
-RAISE_DELTA_PCT = 0.05         # suggest +5% price increase
-LOWER_DELTA_PCT = 0.10         # suggest -10% price decrease
+ELASTICITY_INELASTIC = -0.3  # proxy > -0.3 → demand inelastic
+RAISE_DELTA_PCT = 0.05  # suggest +5% price increase
+LOWER_DELTA_PCT = 0.10  # suggest -10% price decrease
 
 
 def _compute_pearson(xs: list[float], ys: list[float]) -> float | None:
@@ -129,7 +130,7 @@ def generate_price_suggestions(store_id: int, session) -> list[dict]:
         elasticity_proxy: float | None = None
         if len(history) >= 2:
             prices = [float(r.avg_selling_price or selling_price) for r in history]
-            units  = [float(r.units_sold or 0) for r in history]
+            units = [float(r.units_sold or 0) for r in history]
 
             # median price for this window
             median_price = statistics.median(prices)
@@ -162,10 +163,7 @@ def generate_price_suggestions(store_id: int, session) -> list[dict]:
         suggestion: dict | None = None
 
         # RAISE: low-margin AND inelastic demand
-        if (
-            margin_pct < MARGIN_RAISE_THRESHOLD
-            and elasticity_proxy > ELASTICITY_INELASTIC
-        ):
+        if margin_pct < MARGIN_RAISE_THRESHOLD and elasticity_proxy > ELASTICITY_INELASTIC:
             new_price = round(selling_price * (1 + RAISE_DELTA_PCT), 2)
             change_pct = round(RAISE_DELTA_PCT * 100, 2)
             suggestion = {
@@ -215,3 +213,104 @@ def generate_price_suggestions(store_id: int, session) -> list[dict]:
         len(suggestions),
     )
     return suggestions
+
+
+def generate_optimal_price(store_id: int, product_ids: list[int], session, objective: str = "profit") -> dict:
+    """
+    V2 Optimal Pricing: Bayesian elasticity + Inventory pressure + SHAP.
+    """
+    from .bayesian import get_bayesian_recommendation
+
+    results = {}
+    for pid in product_ids:
+        # Fetch 90-day history
+        cutoff_90 = datetime.now(timezone.utc).date() - timedelta(days=90)
+        history = session.execute(
+            text(
+                "SELECT avg_selling_price, units_sold FROM daily_sku_summary WHERE store_id = :sid AND product_id = :pid AND date >= :cutoff"
+            ),
+            {"sid": store_id, "pid": pid, "cutoff": str(cutoff_90)},
+        ).fetchall()
+
+        prod = session.execute(
+            text("SELECT selling_price, cost_price, current_stock FROM products WHERE product_id = :pid"), {"pid": pid}
+        ).fetchone()
+
+        if not history or not prod:
+            results[pid] = {"error": "Insufficient data"}
+            continue
+
+        prices = [float(h.avg_selling_price) for h in history if h.avg_selling_price]
+        quantities = [float(h.units_sold) for h in history]
+
+        rec = get_bayesian_recommendation(
+            prices, quantities, float(prod.selling_price), float(prod.cost_price), float(prod.current_stock or 0)
+        )
+        results[pid] = rec
+
+    return results
+
+
+def generate_market_aware_suggestions(store_id: int, session) -> list[dict]:
+    """
+    Enhance the standard price suggestions with real-time market signals.
+    - If competitor prices drop, we might reconsider a RAISE.
+    - If commodity indices spike, we might accelerate a RAISE.
+    """
+    from app.market_intelligence.engine import IntelligenceEngine
+    from app.models import PriceIndex
+
+    base_suggestions = generate_price_suggestions(store_id, session)
+    if not base_suggestions:
+        return []
+
+    # Get recent global indices for context
+    now = datetime.now(timezone.utc)
+    recent_indices = session.execute(
+        text("""
+            SELECT category_id, index_value
+            FROM price_indices
+            WHERE computed_at >= :recent
+            ORDER BY computed_at DESC
+        """),
+        {"recent": str(now - timedelta(days=7))},
+    ).fetchall()
+
+    # Map category_id -> latest index
+    category_indices = {}
+    for row in recent_indices:
+        if row.category_id not in category_indices:
+            category_indices[row.category_id] = float(row.index_value)
+
+    # Enhance suggestions
+    enhanced = []
+    for sugg in base_suggestions:
+        product_id = sugg["product_id"]
+
+        # Get category for product
+        prod_info = session.execute(
+            text("SELECT category_id FROM products WHERE product_id = :pid"), {"pid": product_id}
+        ).fetchone()
+
+        cat_id = prod_info.category_id if prod_info else None
+        idx_val = category_indices.get(cat_id) if cat_id else None
+
+        # Market context modification
+        sugg["market_context"] = {}
+
+        if sugg["suggestion_type"] == "RAISE" and idx_val and idx_val > 105.0:
+            # Market is inflating, we have more cover to raise prices
+            sugg["suggested_price"] = round(sugg["suggested_price"] * 1.02, 2)
+            sugg["reason"] += f" Additionally accelerated by rising category inflation (Index: {idx_val:.1f})."
+            sugg["market_context"]["inflation_support"] = True
+
+        elif sugg["suggestion_type"] == "LOWER" and idx_val and idx_val < 95.0:
+            # Market is deflating, lower price further to remain competitive
+            sugg["suggested_price"] = round(sugg["suggested_price"] * 0.98, 2)
+            sugg["reason"] += f" Further reduced to match category deflation (Index: {idx_val:.1f})."
+            sugg["market_context"]["deflation_pressure"] = True
+
+        enhanced.append(sugg)
+
+    logger.info("generate_market_aware_suggestions store_id=%s enhanced %d suggestions", store_id, len(enhanced))
+    return enhanced

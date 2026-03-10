@@ -3,6 +3,7 @@ Pricing API Routes
 ==================
 All endpoints require JWT auth. Store-scoped via g.current_user['store_id'].
 """
+
 from datetime import datetime, timezone
 
 from flask import g, request
@@ -17,14 +18,17 @@ from . import pricing_bp
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _store_id() -> int:
     return int(g.current_user["store_id"])
+
 
 def _user_id() -> int:
     return int(g.current_user["user_id"])
 
 
 # ── 1. List PENDING suggestions ───────────────────────────────────────────────
+
 
 @pricing_bp.route("/suggestions", methods=["GET"])
 @require_auth
@@ -71,7 +75,7 @@ def list_suggestions():
             "reason": r.reason,
             "confidence": r.confidence,
             "status": r.status,
-            "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') else r.created_at,
+            "created_at": r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else r.created_at,
             "current_margin_pct": round(float(r.current_margin_pct), 2) if r.current_margin_pct else None,
             "suggested_margin_pct": round(float(r.suggested_margin_pct), 2) if r.suggested_margin_pct else None,
         }
@@ -82,15 +86,14 @@ def list_suggestions():
 
 # ── 2. Apply a suggestion ─────────────────────────────────────────────────────
 
+
 @pricing_bp.route("/suggestions/<int:suggestion_id>/apply", methods=["POST"])
 @require_auth
 def apply_suggestion(suggestion_id: int):
     store_id = _store_id()
-    user_id  = _user_id()
+    user_id = _user_id()
 
-    suggestion = db.session.query(PricingSuggestion).filter_by(
-        id=suggestion_id, store_id=store_id
-    ).first()
+    suggestion = db.session.query(PricingSuggestion).filter_by(id=suggestion_id, store_id=store_id).first()
 
     if not suggestion:
         return format_response(False, error={"code": "NOT_FOUND", "message": "Suggestion not found"}), 404
@@ -104,9 +107,7 @@ def apply_suggestion(suggestion_id: int):
             },
         ), 409
 
-    product = db.session.query(Product).filter_by(
-        product_id=suggestion.product_id, store_id=store_id
-    ).first()
+    product = db.session.query(Product).filter_by(product_id=suggestion.product_id, store_id=store_id).first()
     if not product:
         return format_response(False, error={"code": "PRODUCT_NOT_FOUND", "message": "Product not found"}), 404
 
@@ -136,25 +137,27 @@ def apply_suggestion(suggestion_id: int):
 
     db.session.commit()
 
-    return format_response(True, data={
-        "suggestion_id": suggestion_id,
-        "product_id": product.product_id,
-        "old_price": old_price,
-        "new_price": float(suggestion.suggested_price),
-        "status": "APPLIED",
-    }), 200
+    return format_response(
+        True,
+        data={
+            "suggestion_id": suggestion_id,
+            "product_id": product.product_id,
+            "old_price": old_price,
+            "new_price": float(suggestion.suggested_price),
+            "status": "APPLIED",
+        },
+    ), 200
 
 
 # ── 3. Dismiss a suggestion ───────────────────────────────────────────────────
+
 
 @pricing_bp.route("/suggestions/<int:suggestion_id>/dismiss", methods=["POST"])
 @require_auth
 def dismiss_suggestion(suggestion_id: int):
     store_id = _store_id()
 
-    suggestion = db.session.query(PricingSuggestion).filter_by(
-        id=suggestion_id, store_id=store_id
-    ).first()
+    suggestion = db.session.query(PricingSuggestion).filter_by(id=suggestion_id, store_id=store_id).first()
 
     if not suggestion:
         return format_response(False, error={"code": "NOT_FOUND", "message": "Suggestion not found"}), 404
@@ -177,6 +180,7 @@ def dismiss_suggestion(suggestion_id: int):
 
 # ── 4. Price history for a product ────────────────────────────────────────────
 
+
 @pricing_bp.route("/history", methods=["GET"])
 @require_auth
 def price_history():
@@ -186,9 +190,13 @@ def price_history():
     if not product_id:
         return format_response(False, error={"code": "MISSING_PARAM", "message": "product_id is required"}), 400
 
-    rows = db.session.query(ProductPriceHistory).filter_by(
-        product_id=product_id
-    ).order_by(ProductPriceHistory.changed_at.desc()).limit(100).all()
+    rows = (
+        db.session.query(ProductPriceHistory)
+        .filter_by(product_id=product_id)
+        .order_by(ProductPriceHistory.changed_at.desc())
+        .limit(100)
+        .all()
+    )
 
     data = [
         {
@@ -198,7 +206,7 @@ def price_history():
             "old_price": float(r.old_price) if r.old_price else None,
             "new_price": float(r.new_price) if r.new_price else None,
             "reason": r.reason,
-            "changed_at": r.changed_at.isoformat() if hasattr(r.changed_at, 'isoformat') else r.changed_at,
+            "changed_at": r.changed_at.isoformat() if hasattr(r.changed_at, "isoformat") else r.changed_at,
             "changed_by": r.changed_by,
         }
         for r in rows
@@ -207,6 +215,7 @@ def price_history():
 
 
 # ── 5. Pricing rules (GET + PUT) ──────────────────────────────────────────────
+
 
 @pricing_bp.route("/rules", methods=["GET"])
 @require_auth
@@ -221,7 +230,7 @@ def get_pricing_rules():
             "rule_type": r.rule_type,
             "parameters": r.parameters,
             "is_active": r.is_active,
-            "created_at": r.created_at.isoformat() if hasattr(r.created_at, 'isoformat') else r.created_at,
+            "created_at": r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else r.created_at,
         }
         for r in rules
     ]
@@ -234,20 +243,18 @@ def upsert_pricing_rules():
     store_id = _store_id()
     payload = request.json or {}
 
-    rule_type  = payload.get("rule_type")
+    rule_type = payload.get("rule_type")
     parameters = payload.get("parameters", {})
-    is_active  = payload.get("is_active", True)
+    is_active = payload.get("is_active", True)
 
     if not rule_type:
         return format_response(False, error={"code": "MISSING_FIELD", "message": "rule_type is required"}), 400
 
-    existing = db.session.query(PricingRule).filter_by(
-        store_id=store_id, rule_type=rule_type
-    ).first()
+    existing = db.session.query(PricingRule).filter_by(store_id=store_id, rule_type=rule_type).first()
 
     if existing:
         existing.parameters = parameters
-        existing.is_active  = is_active
+        existing.is_active = is_active
         rule = existing
     else:
         rule = PricingRule(
@@ -260,10 +267,13 @@ def upsert_pricing_rules():
 
     db.session.commit()
 
-    return format_response(True, data={
-        "id": rule.id,
-        "store_id": rule.store_id,
-        "rule_type": rule.rule_type,
-        "parameters": rule.parameters,
-        "is_active": rule.is_active,
-    }), 200
+    return format_response(
+        True,
+        data={
+            "id": rule.id,
+            "store_id": rule.store_id,
+            "rule_type": rule.rule_type,
+            "parameters": rule.parameters,
+            "is_active": rule.is_active,
+        },
+    ), 200

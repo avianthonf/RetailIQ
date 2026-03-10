@@ -27,7 +27,30 @@ models_bp = Blueprint('models', __name__)
 class Base(DeclarativeBase):
     pass
 
-class User(Base):
+
+class AuditMixin:
+    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(32), default="USER")
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[str] = mapped_column(String(16), default="SUCCESS")
+    meta_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+class User(Base, AuditMixin):
     __tablename__ = 'users'
 
     user_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -41,9 +64,15 @@ class User(Base):
         ForeignKey('stores.store_id', use_alter=True, name='fk_users_store_id'),
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
-class Store(Base):
+    # Security & MFA
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+class Store(Base, AuditMixin):
     __tablename__ = 'stores'
 
     store_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -59,7 +88,7 @@ class Store(Base):
     closing_time: Mapped[time | None] = mapped_column(Time)
     timezone: Mapped[str | None] = mapped_column(String)
 
-class Category(Base):
+class Category(Base, AuditMixin):
     __tablename__ = 'categories'
 
     category_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -69,7 +98,7 @@ class Category(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     gst_rate: Mapped[float | None] = mapped_column(Numeric(5, 2), default=18)
 
-class Product(Base):
+class Product(Base, AuditMixin):
     __tablename__ = 'products'
 
     product_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -118,7 +147,7 @@ class ProductPriceHistory(Base):
     changed_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=True)
 
 
-class PricingSuggestion(Base):
+class PricingSuggestion(Base, AuditMixin):
     __tablename__ = 'pricing_suggestions'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -135,7 +164,6 @@ class PricingSuggestion(Base):
         server_default='PENDING',
         default='PENDING',
     )
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     actioned_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
     __table_args__ = (
@@ -144,7 +172,7 @@ class PricingSuggestion(Base):
     )
 
 
-class PricingRule(Base):
+class PricingRule(Base, AuditMixin):
     __tablename__ = 'pricing_rules'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -152,13 +180,12 @@ class PricingRule(Base):
     rule_type: Mapped[str | None] = mapped_column(String(32))
     parameters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('idx_pricing_rules_store_active', 'store_id', 'is_active'),
     )
 
-class Customer(Base):
+class Customer(Base, AuditMixin):
     __tablename__ = 'customers'
 
     customer_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -170,9 +197,8 @@ class Customer(Base):
     birth_date: Mapped[date | None] = mapped_column(Date)
     address: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
 
-class Transaction(Base):
+class Transaction(Base, AuditMixin):
     __tablename__ = 'transactions'
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -180,17 +206,17 @@ class Transaction(Base):
     customer_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('customers.customer_id'), nullable=True)
     payment_mode: Mapped[str | None] = mapped_column(SQLEnum('CASH', 'UPI', 'CARD', 'CREDIT', name='payment_mode_enum'))
     notes: Mapped[str | None] = mapped_column(String(200))
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     is_return: Mapped[bool] = mapped_column(Boolean, default=False)
     original_transaction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('transactions.transaction_id'), nullable=True)
     session_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('staff_sessions.id'), nullable=True)
+    total_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
 
     __table_args__ = (
         Index('idx_transactions_store_created', 'store_id', text('created_at DESC')),
         Index('idx_transactions_session_id', 'session_id'),
     )
 
-class TransactionItem(Base):
+class TransactionItem(Base, AuditMixin):
     __tablename__ = 'transaction_items'
 
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -207,7 +233,7 @@ class TransactionItem(Base):
         Index('idx_transaction_items_product_id', 'product_id'),
     )
 
-class StockAdjustment(Base):
+class StockAdjustment(Base, AuditMixin):
     __tablename__ = 'stock_adjustments'
 
     adj_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -218,7 +244,7 @@ class StockAdjustment(Base):
     adjusted_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     reason: Mapped[str | None] = mapped_column(String)
 
-class StockAudit(Base):
+class StockAudit(Base, AuditMixin):
     __tablename__ = 'stock_audits'
 
     audit_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -228,7 +254,7 @@ class StockAudit(Base):
     status: Mapped[str | None] = mapped_column(String(20))
     notes: Mapped[str | None] = mapped_column(String)
 
-class StockAuditItem(Base):
+class StockAuditItem(Base, AuditMixin):
     __tablename__ = 'stock_audit_items'
 
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -238,7 +264,7 @@ class StockAuditItem(Base):
     actual_stock: Mapped[float | None] = mapped_column(Numeric(12, 3))
     discrepancy: Mapped[float | None] = mapped_column(Numeric(12, 3))
 
-class Alert(Base):
+class Alert(Base, AuditMixin):
     __tablename__ = 'alerts'
 
     alert_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -246,8 +272,8 @@ class Alert(Base):
     alert_type: Mapped[str | None] = mapped_column(String(50))
     priority: Mapped[str | None] = mapped_column(SQLEnum('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO', name='alert_priority_enum'))
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('products.product_id'), nullable=True)
+    product_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     message: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
     resolved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     snoozed_until: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
@@ -255,7 +281,7 @@ class Alert(Base):
         Index('idx_alerts_store_resolved_priority', 'store_id', 'resolved_at', 'priority'),
     )
 
-class ForecastCache(Base):
+class ForecastCache(Base, AuditMixin):
     __tablename__ = 'forecast_cache'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -268,7 +294,7 @@ class ForecastCache(Base):
     regime: Mapped[str | None] = mapped_column(String(20))
     model_type: Mapped[str | None] = mapped_column(String(30))
     training_window_days: Mapped[int | None] = mapped_column(Integer)
-    generated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
+    generated_at: Mapped[datetime] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint('store_id', 'product_id', 'forecast_date',
@@ -276,7 +302,7 @@ class ForecastCache(Base):
     )
 
 
-class DailyStoreSummary(Base):
+class DailyStoreSummary(Base, AuditMixin):
     __tablename__ = 'daily_store_summary'
 
     date: Mapped[date] = mapped_column(Date, primary_key=True)
@@ -291,7 +317,7 @@ class DailyStoreSummary(Base):
         Index('idx_daily_store_summary_store_date', 'store_id', text('date DESC')),
     )
 
-class DailyCategorySummary(Base):
+class DailyCategorySummary(Base, AuditMixin):
     __tablename__ = 'daily_category_summary'
 
     date: Mapped[date] = mapped_column(Date, primary_key=True)
@@ -301,7 +327,7 @@ class DailyCategorySummary(Base):
     profit: Mapped[float | None] = mapped_column(Numeric(12, 2))
     units_sold: Mapped[float | None] = mapped_column(Numeric(12, 3))
 
-class DailySkuSummary(Base):
+class DailySkuSummary(Base, AuditMixin):
     __tablename__ = 'daily_sku_summary'
 
     date: Mapped[date] = mapped_column(Date, primary_key=True)
@@ -316,7 +342,7 @@ class DailySkuSummary(Base):
         Index('idx_daily_sku_summary_store_product_date', 'store_id', 'product_id', text('date DESC')),
     )
 
-class Supplier(Base):
+class Supplier(Base, AuditMixin):
     __tablename__ = 'suppliers'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -328,10 +354,8 @@ class Supplier(Base):
     address: Mapped[str | None] = mapped_column(Text)
     payment_terms_days: Mapped[int | None] = mapped_column(Integer, default=30)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-class SupplierProduct(Base):
+class SupplierProduct(Base, AuditMixin):
     __tablename__ = 'supplier_products'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -346,7 +370,7 @@ class SupplierProduct(Base):
         UniqueConstraint('supplier_id', 'product_id', name='uq_supplier_product'),
     )
 
-class PurchaseOrder(Base):
+class PurchaseOrder(Base, AuditMixin):
     __tablename__ = 'purchase_orders'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -356,10 +380,8 @@ class PurchaseOrder(Base):
     expected_delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int | None] = mapped_column(Integer, ForeignKey('users.user_id'))
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-class PurchaseOrderItem(Base):
+class PurchaseOrderItem(Base, AuditMixin):
     __tablename__ = 'purchase_order_items'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -369,7 +391,7 @@ class PurchaseOrderItem(Base):
     received_qty: Mapped[float | None] = mapped_column(Numeric(12, 3), default=0)
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
 
-class GoodsReceiptNote(Base):
+class GoodsReceiptNote(Base, AuditMixin):
     __tablename__ = 'goods_receipt_notes'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -379,7 +401,7 @@ class GoodsReceiptNote(Base):
     received_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     notes: Mapped[str | None] = mapped_column(Text)
 
-class Barcode(Base):
+class Barcode(Base, AuditMixin):
     __tablename__ = 'barcodes'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -387,14 +409,13 @@ class Barcode(Base):
     store_id: Mapped[int | None] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
     barcode_value: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     barcode_type: Mapped[str | None] = mapped_column(String(16), default='EAN13')
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index('idx_barcodes_store_product', 'store_id', 'product_id'),
     )
 
 
-class ReceiptTemplate(Base):
+class ReceiptTemplate(Base, AuditMixin):
     __tablename__ = 'receipt_templates'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -403,10 +424,9 @@ class ReceiptTemplate(Base):
     footer_text: Mapped[str | None] = mapped_column(Text)
     show_gstin: Mapped[bool] = mapped_column(Boolean, default=False)
     paper_width_mm: Mapped[int] = mapped_column(Integer, default=80)
-    updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
 
-class PrintJob(Base):
+class PrintJob(Base, AuditMixin):
     __tablename__ = 'print_jobs'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -415,14 +435,13 @@ class PrintJob(Base):
     job_type: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default='PENDING')
     payload: Mapped[dict | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
 
     __table_args__ = (
         Index('idx_print_jobs_store_status', 'store_id', 'status'),
     )
 
-class StaffSession(Base):
+class StaffSession(Base, AuditMixin):
     __tablename__ = 'staff_sessions'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -437,7 +456,7 @@ class StaffSession(Base):
         # Used for check constraints in migrations
     )
 
-class StaffDailyTarget(Base):
+class StaffDailyTarget(Base, AuditMixin):
     __tablename__ = 'staff_daily_targets'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -451,7 +470,7 @@ class StaffDailyTarget(Base):
         UniqueConstraint('store_id', 'user_id', 'target_date', name='uq_staff_daily_target_store_user_date'),
     )
 
-class AnalyticsSnapshot(Base):
+class AnalyticsSnapshot(Base, AuditMixin):
     __tablename__ = 'analytics_snapshots'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -460,7 +479,7 @@ class AnalyticsSnapshot(Base):
     built_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     size_bytes: Mapped[int | None] = mapped_column(Integer)
 
-class LoyaltyProgram(Base):
+class LoyaltyProgram(Base, AuditMixin):
     __tablename__ = 'loyalty_programs'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -471,7 +490,7 @@ class LoyaltyProgram(Base):
     expiry_days: Mapped[int | None] = mapped_column(Integer, default=365, server_default='365')
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
 
-class CustomerLoyaltyAccount(Base):
+class CustomerLoyaltyAccount(Base, AuditMixin):
     __tablename__ = 'customer_loyalty_accounts'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -482,7 +501,7 @@ class CustomerLoyaltyAccount(Base):
     lifetime_earned: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default='0')
     last_activity_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
 
-class LoyaltyTransaction(Base):
+class LoyaltyTransaction(Base, AuditMixin):
     __tablename__ = 'loyalty_transactions'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -491,14 +510,13 @@ class LoyaltyTransaction(Base):
     type: Mapped[str] = mapped_column(String(16), nullable=False)
     points: Mapped[float | None] = mapped_column(Numeric(12, 2))
     balance_after: Mapped[float | None] = mapped_column(Numeric(12, 2))
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         CheckConstraint("type IN ('EARN', 'REDEEM', 'EXPIRE', 'ADJUST')", name='chk_loyalty_txn_type'),
     )
 
-class CreditLedger(Base):
+class CreditLedger(Base, AuditMixin):
     __tablename__ = 'credit_ledger'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -506,13 +524,12 @@ class CreditLedger(Base):
     store_id: Mapped[int] = mapped_column(Integer, ForeignKey('stores.store_id'), nullable=False)
     balance: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default='0')
     credit_limit: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default='0')
-    updated_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint('customer_id', 'store_id', name='uq_credit_ledger_cust_store'),
     )
 
-class CreditTransaction(Base):
+class CreditTransaction(Base, AuditMixin):
     __tablename__ = 'credit_transactions'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -521,14 +538,13 @@ class CreditTransaction(Base):
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=False)
     balance_after: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     notes: Mapped[str | None] = mapped_column(String)
 
     __table_args__ = (
         CheckConstraint("type IN ('CREDIT_SALE', 'REPAYMENT', 'ADJUSTMENT')", name='chk_credit_tx_type'),
     )
 
-class HSNMaster(Base):
+class HSNMaster(Base, AuditMixin):
     __tablename__ = 'hsn_master'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -536,7 +552,7 @@ class HSNMaster(Base):
     description: Mapped[str | None] = mapped_column(Text)
     default_gst_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
 
-class StoreGSTConfig(Base):
+class StoreGSTConfig(Base, AuditMixin):
     __tablename__ = 'store_gst_config'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -551,7 +567,7 @@ class StoreGSTConfig(Base):
     state_code: Mapped[str | None] = mapped_column(String(2))
     is_gst_enabled: Mapped[bool] = mapped_column(Boolean, server_default='false', default=False)
 
-class GSTTransaction(Base):
+class GSTTransaction(Base, AuditMixin):
     __tablename__ = 'gst_transactions'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -564,9 +580,8 @@ class GSTTransaction(Base):
     igst_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     total_gst: Mapped[float | None] = mapped_column(Numeric(12, 2))
     hsn_breakdown: Mapped[dict | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
-class GSTFilingPeriod(Base):
+class GSTFilingPeriod(Base, AuditMixin):
     __tablename__ = 'gst_filing_periods'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -590,7 +605,7 @@ class GSTFilingPeriod(Base):
 # WHATSAPP INTEGRATION MODELS
 # ---------------------------------------------------------------------------
 
-class WhatsAppConfig(Base):
+class WhatsAppConfig(Base, AuditMixin):
     __tablename__ = 'whatsapp_config'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -602,7 +617,7 @@ class WhatsAppConfig(Base):
     waba_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
-class WhatsAppTemplate(Base):
+class WhatsAppTemplate(Base, AuditMixin):
     __tablename__ = 'whatsapp_templates'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -614,7 +629,7 @@ class WhatsAppTemplate(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, server_default='true', default=True)
 
 
-class WhatsAppMessageLog(Base):
+class WhatsAppMessageLog(Base, AuditMixin):
     __tablename__ = 'whatsapp_message_log'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -629,21 +644,19 @@ class WhatsAppMessageLog(Base):
     sent_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
 # ---------------------------------------------------------------------------
 # CHAIN OWNERSHIP / MULTI-STORE MODELS
 # ---------------------------------------------------------------------------
 
-class StoreGroup(Base):
+class StoreGroup(Base, AuditMixin):
     __tablename__ = 'store_groups'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     owner_user_id: Mapped[int] = mapped_column(Integer, ForeignKey('users.user_id'), nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
-class StoreGroupMembership(Base):
+class StoreGroupMembership(Base, AuditMixin):
     __tablename__ = 'store_group_memberships'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -655,7 +668,7 @@ class StoreGroupMembership(Base):
         UniqueConstraint('group_id', 'store_id', name='uq_group_store'),
     )
 
-class ChainDailyAggregate(Base):
+class ChainDailyAggregate(Base, AuditMixin):
     __tablename__ = 'chain_daily_aggregates'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -670,7 +683,7 @@ class ChainDailyAggregate(Base):
         UniqueConstraint('group_id', 'store_id', 'date', name='uq_chain_agg_group_store_date'),
     )
 
-class InterStoreTransferSuggestion(Base):
+class InterStoreTransferSuggestion(Base, AuditMixin):
     __tablename__ = 'inter_store_transfer_suggestions'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -681,14 +694,13 @@ class InterStoreTransferSuggestion(Base):
     suggested_qty: Mapped[float | None] = mapped_column(Numeric(12, 3))
     reason: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), server_default='PENDING', default='PENDING')
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
 
 
 # ── Events Models ─────────────────────────────────────────────────────────────
 
 
-class BusinessEvent(Base):
+class BusinessEvent(Base, AuditMixin):
     __tablename__ = 'business_events'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -703,10 +715,9 @@ class BusinessEvent(Base):
     expected_impact_pct: Mapped[float | None] = mapped_column(Numeric(6, 2))
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
     recurrence_rule: Mapped[str | None] = mapped_column(String(128))
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
 
-class DemandSensingLog(Base):
+class DemandSensingLog(Base, AuditMixin):
     __tablename__ = 'demand_sensing_log'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -717,10 +728,9 @@ class DemandSensingLog(Base):
     base_forecast: Mapped[float | None] = mapped_column(Numeric(12, 3))
     event_adjusted_forecast: Mapped[float | None] = mapped_column(Numeric(12, 3))
     active_events: Mapped[dict | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
 
 
-class EventImpactActuals(Base):
+class EventImpactActuals(Base, AuditMixin):
     __tablename__ = 'event_impact_actuals'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -732,7 +742,7 @@ class EventImpactActuals(Base):
 
 # ── Vision / OCR Models ───────────────────────────────────────────────────────
 
-class OcrJob(Base):
+class OcrJob(Base, AuditMixin):
     __tablename__ = 'ocr_jobs'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -746,11 +756,10 @@ class OcrJob(Base):
     raw_ocr_text: Mapped[str | None] = mapped_column(Text)
     extracted_items: Mapped[dict | None] = mapped_column(JSONB)
     error_message: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP)
 
 
-class OcrJobItem(Base):
+class OcrJobItem(Base, AuditMixin):
     __tablename__ = 'ocr_job_items'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -763,10 +772,46 @@ class OcrJobItem(Base):
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-class VisionCategoryTag(Base):
+class VisionCategoryTag(Base, AuditMixin):
     __tablename__ = 'vision_category_tags'
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey('ocr_jobs.id'))
     tag: Mapped[str | None] = mapped_column(String(64))
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 2))
+
+
+# ── RBAC Permissions Model ────────────────────────────────────────────────────
+
+class RBACPermission(Base, AuditMixin):
+    __tablename__ = 'rbac_permissions'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_allowed: Mapped[bool] = mapped_column(Boolean, default=True, server_default='true')
+    conditions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('role', 'resource', 'action', name='uq_rbac_role_resource_action'),
+        Index('idx_rbac_permissions_role', 'role'),
+    )
+
+
+# ── Missing Models ────────────────────────────────────────────────────────────
+
+from .missing_models import (
+    APIUsageRecord,
+    DataSource,
+    Developer,
+    DeveloperApplication,
+    IntelligenceReport,
+    MarketAlert,
+    MarketSignal,
+    MarketplaceApp,
+    PriceIndex,
+    WebhookEvent,
+)
+
+

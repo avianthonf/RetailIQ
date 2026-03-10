@@ -10,6 +10,7 @@ Covers:
   - OTP is emailed on registration
   - Forgot-password triggers reset email
 """
+
 from unittest.mock import MagicMock, patch
 
 import bcrypt
@@ -40,6 +41,7 @@ def test_send_otp_email_dev_fallback(app):
     # Default test config has no MAIL_USERNAME
     with app.app_context():
         from app.email import send_otp_email
+
         result = send_otp_email("user@example.com", "123456")
         assert result is True  # dev fallback always succeeds
 
@@ -48,6 +50,7 @@ def test_send_password_reset_email_dev_fallback(app):
     """When MAIL_USERNAME is empty, password reset email falls back to logger."""
     with app.app_context():
         from app.email import send_password_reset_email
+
         result = send_password_reset_email("user@example.com", "some-reset-token")
         assert result is True
 
@@ -64,6 +67,7 @@ def test_send_otp_email_via_smtp(mock_smtp_class, app):
 
     with app.app_context():
         from app.email import send_otp_email
+
         result = send_otp_email("user@example.com", "654321")
         assert result is True
 
@@ -88,6 +92,7 @@ def test_send_password_reset_email_via_smtp(mock_smtp_class, app):
 
     with app.app_context():
         from app.email import send_password_reset_email
+
         result = send_password_reset_email("user@example.com", "abc-reset-token")
         assert result is True
 
@@ -107,6 +112,7 @@ def test_smtp_failure_returns_false(mock_smtp_class, app):
 
     with app.app_context():
         from app.email import send_otp_email
+
         result = send_otp_email("user@example.com", "111111")
         assert result is False
 
@@ -123,12 +129,15 @@ def test_registration_requires_email(client, app, monkeypatch):
     monkeypatch.setattr("app.auth.utils.get_redis_client", lambda: fake)
     monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: fake)
 
-    resp = client.post("/api/v1/auth/register", json={
-        "full_name": "No Email User",
-        "mobile_number": "9333333333",
-        "password": "secret123",
-    })
-    assert resp.status_code == 400
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "No Email User",
+            "mobile_number": "9333333333",
+            "password": "secret123",
+        },
+    )
+    assert resp.status_code == 422
     data = resp.get_json()
     assert data["success"] is False
     assert "email" in str(data["error"]).lower()
@@ -150,13 +159,16 @@ def test_registration_sends_otp_email(client, app, monkeypatch):
 
     monkeypatch.setattr("app.email.send_otp_email", mock_send_otp)
 
-    resp = client.post("/api/v1/auth/register", json={
-        "full_name": "Email OTP User",
-        "mobile_number": "9444444444",
-        "password": "secret123",
-        "store_name": "Email Store",
-        "email": "emailotp@example.com",
-    })
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Email OTP User",
+            "mobile_number": "9444444444",
+            "password": "secret123",
+            "store_name": "Email Store",
+            "email": "emailotp@example.com",
+        },
+    )
     assert resp.status_code == 201
 
     # Verify OTP was stored in Redis
@@ -203,9 +215,12 @@ def test_forgot_password_sends_reset_email(client, app, monkeypatch):
 
     monkeypatch.setattr("app.email.send_password_reset_email", mock_send_reset)
 
-    resp = client.post("/api/v1/auth/forgot-password", json={
-        "mobile_number": "9555555555",
-    })
+    resp = client.post(
+        "/api/v1/auth/forgot-password",
+        json={
+            "mobile_number": "9555555555",
+        },
+    )
     assert resp.status_code == 200
 
     # Verify reset email was dispatched to user's email

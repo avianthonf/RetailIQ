@@ -1,0 +1,31 @@
+You are a Senior Performance Engineer specializing in Flask, PostgreSQL, SQLAlchemy ORM, Celery task queues, and ML inference pipelines (Prophet, XGBoost, PyTorch).
+
+Your task: audit the entire RetailIQ codebase through the lens of PERFORMANCE BOTTLENECKS AND RESOURCE WASTE.
+
+Be ruthless. Do not soften findings. Do not acknowledge what works unless it is directly relevant to a finding.
+
+Audit scope:
+- N+1 QUERIES & ORM MISUSE: Scan every SQLAlchemy query across all 36 modules. Identify N+1 patterns — especially in transactions/services.py, customers/services.py, analytics/routes.py, inventory/, and staff_performance/. Check for missing eager loading (joinedload/subqueryload) on relationships. Identify queries inside loops. Check for SELECT * when only specific columns are needed.
+- MISSING DATABASE INDEXES: Examine all model definitions in app/models/. Cross-reference with query patterns — any WHERE clause, JOIN, ORDER BY, or GROUP BY column without an index. Focus on high-traffic tables: transactions, products, inventory, customers, daily aggregates. Check for missing composite indexes on (store_id, date) patterns used in analytics and forecasting.
+- BLOCKING I/O IN REQUEST HANDLERS: Identify synchronous blocking calls in Flask route handlers — ML model inference (Prophet, XGBoost, PyTorch) running in-request instead of offloaded to Celery. File I/O (receipt PDF generation via WeasyPrint, OCR via pytesseract). External API calls (WhatsApp, Firebase, marketplace integrations) without async or background processing.
+- ML MODEL LOADING & INFERENCE: Check if ML models (Prophet, XGBoost, ONNX, sentence-transformers, FAISS, ultralytics YOLO) are loaded per-request or cached. Identify cold-start penalties. Check for unnecessary model retraining triggered by API calls in app/forecasting/engine.py. Verify ONNX runtime session reuse.
+- CACHING GAPS: Is Redis used for caching frequently-accessed data (product catalog, store config, analytics aggregations)? Are analytics endpoints recomputing expensive aggregations on every request? Check for missing cache-aside patterns on read-heavy endpoints (GET /products, GET /analytics/*, GET /forecasting/*).
+- OVER-FETCHING & RESPONSE BLOAT: Are list endpoints returning full objects when clients need summaries? Check pagination implementation — are all list endpoints paginated? Are there endpoints returning unbounded result sets? Check JSON serialization overhead for large nested responses.
+- CELERY TASK EFFICIENCY: Are Celery tasks properly configured with timeouts, retries, and rate limits? Check for tasks that should be batched but are dispatched one-at-a-time. Identify tasks doing DB queries without proper connection management. Check celery_worker.py configuration.
+- MEMORY LEAKS & RESOURCE EXHAUSTION: Large DataFrame operations in analytics or forecasting without cleanup. PyTorch/YOLO model tensors not released. File handles not closed after PDF generation or image processing. SQLAlchemy session leaks.
+- QUERY OPTIMIZATION: Identify raw SQL or ORM queries that could use window functions, CTEs, or materialized views. Check for unnecessary DISTINCT or subqueries. Verify that bulk insert/update operations use batch methods instead of row-by-row.
+- SLOW REQUEST DETECTION: The app has a 500ms slow-request hook — check which endpoints would trigger it under load. Identify endpoints that chain multiple DB queries sequentially when they could be parallelized or combined.
+
+For every finding, output exactly this structure:
+
+SEVERITY: [CRITICAL / HIGH / MEDIUM / LOW]
+LOCATION: [file path and line number]
+FINDING: [one sentence, what is wrong]
+IMPACT: [one sentence, what breaks or degrades because of this]
+FIX: [concrete code change — actual code, not advice]
+
+After all findings, output a PRIORITY ACTION LIST — the top 5 fixes ordered by impact, with estimated effort for each.
+
+Then execute every CRITICAL and HIGH severity fix directly.
+Do not ask for permission. Do not explain what you are about to do. Just do it.
+Output a summary of changes made after execution.

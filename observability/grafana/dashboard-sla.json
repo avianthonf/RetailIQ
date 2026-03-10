@@ -1,0 +1,26 @@
+{
+  "title": "RetailIQ SLA Dashboard",
+  "panels": [
+    {
+      "title": "Availability (99.99% Target)",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(up{job='retailiq-api'}) / count(up{job='retailiq-api'}) * 100" }
+      ]
+    },
+    {
+      "title": "p99 Latency (50ms Target)",
+      "type": "graph",
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le, region))" }
+      ]
+    },
+    {
+      "title": "Cost per 1M Requests ($5 Target)",
+      "type": "stat",
+      "targets": [
+        { "expr": "sum(rate(retailiq_api_requests_total[24h])) / sum(rate(cloud_billing_cost_dollars[24h])) * 1000000" }
+      ]
+    }
+  ]
+}

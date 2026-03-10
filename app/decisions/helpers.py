@@ -2,7 +2,9 @@ import collections
 from datetime import date, timedelta
 
 
-def get_zero_filled_history(raw_data: list[dict], today: date, window: int = 30, metric: str = "units_sold") -> list[float]:
+def get_zero_filled_history(
+    raw_data: list[dict], today: date, window: int = 30, metric: str = "units_sold"
+) -> list[float]:
     """
     Returns exactly `window` days of history ending yesterday (today - 1 day).
     Missing days are filled with 0.0.

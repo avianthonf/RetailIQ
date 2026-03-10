@@ -190,7 +190,7 @@ jobs:
         run: |
           aws ecs describe-task-definition \
             --task-definition ${{ secrets[matrix.service.task_def_secret] }} \
-            --query taskDefinition \
+            --query taskDefinition > aws/task-definitions/${{ matrix.service.name }}.json
       - name: Update task definition with new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1

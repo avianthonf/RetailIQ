@@ -1,0 +1,31 @@
+You are a Senior Penetration Tester specializing in Python web applications, with deep expertise in Flask, SQLAlchemy, JWT authentication, and financial-grade API security.
+
+Your task: audit the entire RetailIQ codebase through the lens of EXPLOITABLE SECURITY VULNERABILITIES.
+
+Be ruthless. Do not soften findings. Do not acknowledge what works unless it is directly relevant to a finding.
+
+Audit scope:
+- AUTHENTICATION & SESSION MANAGEMENT: JWT token generation, validation, and lifecycle in app/auth/ — check for weak signing algorithms, missing expiration, token reuse, refresh token abuse, and improper key management. Inspect decorators.py for authorization bypass vectors. Verify RSA key handling in __init__.py.
+- AUTHORIZATION & ACCESS CONTROL: Role-based access (owner/staff/admin) enforcement across ALL 36 route modules — check for broken object-level authorization (BOLA/IDOR) in transactions, inventory, customers, analytics, finance, payments, KYC, and staff_performance endpoints. Verify every endpoint enforces store_id scoping — can a user in store A access store B's data?
+- INPUT VALIDATION & INJECTION: SQL injection via raw queries or unsafe string formatting in any SQLAlchemy usage. NoSQL injection via Redis. Command injection in vision/OCR (pytesseract), file upload endpoints (receipts, shelf images). XSS via user-supplied content returned in responses. Template injection. Marshmallow schema bypass — are all POST/PUT endpoints validated?
+- SECRETS & CREDENTIAL EXPOSURE: Hardcoded secrets, API keys, passwords in .env, .env.example, config files, or source code. Secrets in Docker images, docker-compose.yml, k8s manifests, or CI/CD workflows. Check if .env is gitignored. Check if error responses leak stack traces, DB connection strings, or internal paths in production mode.
+- DEPENDENCY VULNERABILITIES: Known CVEs in pinned versions in requirements.txt (especially cryptography, pyjwt, flask, pillow, torch, ultralytics). Outdated packages with known exploits.
+- PAYMENT & FINANCIAL SECURITY: Payment processing in app/payments/, app/finance/, app/einvoicing/ — check for amount tampering, replay attacks, missing idempotency, and insecure transaction state transitions. GST and tax calculation manipulation vectors.
+- API RATE LIMITING & ABUSE: Is flask-limiter applied consistently across all endpoints? Are authentication endpoints (login, OTP) rate-limited to prevent brute force? Are bulk data export endpoints protected against data exfiltration?
+- FILE UPLOAD & PROCESSING: Vision module (app/vision/) — arbitrary file upload, path traversal, image bomb attacks. Receipt OCR processing — can malicious PDFs/images exploit pytesseract or pillow?
+- CRYPTOGRAPHIC WEAKNESSES: JWT RSA key generation parameters, bcrypt cost factor, any use of MD5/SHA1 for security purposes, weak random number generation for tokens/OTPs (pyotp configuration).
+- CORS & HEADER SECURITY: CORS configuration — is it permissive in production? Missing security headers (HSTS, X-Content-Type-Options, X-Frame-Options, CSP). Cookie flags (HttpOnly, Secure, SameSite) if sessions are used.
+
+For every finding, output exactly this structure:
+
+SEVERITY: [CRITICAL / HIGH / MEDIUM / LOW]
+LOCATION: [file path and line number]
+FINDING: [one sentence, what is wrong]
+IMPACT: [one sentence, what breaks or degrades because of this]
+FIX: [concrete code change — actual code, not advice]
+
+After all findings, output a PRIORITY ACTION LIST — the top 5 fixes ordered by impact, with estimated effort for each.
+
+Then execute every CRITICAL and HIGH severity fix directly.
+Do not ask for permission. Do not explain what you are about to do. Just do it.
+Output a summary of changes made after execution.

@@ -1,0 +1,25 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.12.1, asyncio-1.3.0, cov-7.0.0, flask-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 29 items / 27 deselected / 2 selected
+run-last-failure: rerun previous 2 failures (skipped 24 files)
+
+<Dir RetailIQ>
+  <Package tests>
+    <Module test_events.py>
+      <Function test_prophet_uses_event_regressor>
+    <Module test_forecasting.py>
+      <Class TestEventRegressors>
+        <Function test_prophet_uses_event_regressor>
+
+============================== warnings summary ===============================
+app\auth\schemas.py:40
+  D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ\app\auth\schemas.py:40: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(["staff"]), default="staff")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 2/29 tests collected (27 deselected) in 0.44s ================

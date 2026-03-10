@@ -7,6 +7,7 @@ IMPORTANT – SQLite in-memory databases are per-connection by default.
 We use StaticPool to force all SQLAlchemy connections (fixture sessions AND
 Flask request sessions) to share the exact same connection/DB instance.
 """
+
 import os
 
 import pytest
@@ -21,9 +22,20 @@ from sqlalchemy.pool import StaticPool
 def _compile_jsonb(type_, compiler, **kw):
     return "JSON"
 
+
 @compiles(UUID, "sqlite")
 def _compile_uuid(type_, compiler, **kw):
     return "VARCHAR"
+
+
+from sqlalchemy import BigInteger
+
+
+@compiles(BigInteger, "sqlite")
+def _compile_bigint(type_, compiler, **kw):
+    return "INTEGER"
+
+
 # ────────────────────────────────────────────────────────────────────────────
 
 from app import create_app
@@ -35,6 +47,7 @@ from app.models import Base, Category, Product, Store, User
 # App / DB fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="function")
 def app():
     """Create a fresh Flask app with an in-memory SQLite DB for each test.
@@ -43,18 +56,39 @@ def app():
     test-client request sessions) shares the exact same in-memory database.
     Without this each new connection gets an empty SQLite DB.
     """
-    test_app = create_app({
-        "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-        "SQLALCHEMY_ENGINE_OPTIONS": {
-            "connect_args": {"check_same_thread": False},
-            "poolclass": StaticPool,
-        },
-        "CELERY_ALWAYS_EAGER": True,
-        # Disable rate-limiting in tests
-        "RATELIMIT_ENABLED": False,
-        "RATELIMIT_STORAGE_URI": "memory://",
-    })
+    # Generate test RSA keys first
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    private_key_pem = private_pem.decode("utf-8")
+    public_key_pem = public_pem.decode("utf-8")
+
+    test_app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SQLALCHEMY_ENGINE_OPTIONS": {
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            },
+            "CELERY_ALWAYS_EAGER": True,
+            # Disable rate-limiting in tests
+            "RATELIMIT_ENABLED": False,
+            "RATELIMIT_STORAGE_URI": "memory://",
+            "JWT_PRIVATE_KEY": private_key_pem,
+            "JWT_PUBLIC_KEY": public_key_pem,
+        }
+    )
 
     with test_app.app_context():
         # Generate test RSA keys
@@ -87,7 +121,6 @@ def app():
             conn.execute(_db.text("PRAGMA foreign_keys = ON;"))
 
 
-
 @pytest.fixture(scope="function")
 def client(app):
     return app.test_client()
@@ -96,6 +129,7 @@ def client(app):
 # ---------------------------------------------------------------------------
 # Data fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="function")
 def test_store(app):

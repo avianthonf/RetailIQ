@@ -5,10 +5,7 @@ class ProductCreateSchema(Schema):
     name = fields.Str(required=True, validate=validate.Length(min=1, max=255))
     category_id = fields.Int(load_default=None)
     sku_code = fields.Str(load_default=None, allow_none=True)
-    uom = fields.Str(
-        load_default=None,
-        validate=validate.OneOf(['pieces', 'kg', 'litre', 'pack'])
-    )
+    uom = fields.Str(load_default=None, validate=validate.OneOf(["pieces", "kg", "litre", "pack"]))
     cost_price = fields.Float(required=True)
     selling_price = fields.Float(required=True)
     current_stock = fields.Float(load_default=0.0)
@@ -20,22 +17,16 @@ class ProductCreateSchema(Schema):
 
     @validates_schema
     def validate_prices(self, data, **kwargs):
-        if data.get('selling_price') is not None and data.get('cost_price') is not None:
-            if data['selling_price'] < data['cost_price']:
-                raise ValidationError(
-                    'selling_price must be >= cost_price',
-                    field_name='selling_price'
-                )
+        if data.get("selling_price") is not None and data.get("cost_price") is not None:
+            if data["selling_price"] < data["cost_price"]:
+                raise ValidationError("selling_price must be >= cost_price", field_name="selling_price")
 
 
 class ProductUpdateSchema(Schema):
     name = fields.Str(validate=validate.Length(min=1, max=255))
     category_id = fields.Int(allow_none=True)
     sku_code = fields.Str(allow_none=True)
-    uom = fields.Str(
-        allow_none=True,
-        validate=validate.OneOf(['pieces', 'kg', 'litre', 'pack'])
-    )
+    uom = fields.Str(allow_none=True, validate=validate.OneOf(["pieces", "kg", "litre", "pack"]))
     cost_price = fields.Float()
     selling_price = fields.Float()
     reorder_level = fields.Float()
@@ -49,7 +40,7 @@ class ProductUpdateSchema(Schema):
 class StockUpdateSchema(Schema):
     quantity_added = fields.Float(required=True)
     purchase_price = fields.Float(required=True)
-    date = fields.Str(load_default=None)          # YYYY-MM-DD string, optional
+    date = fields.Str(load_default=None)  # YYYY-MM-DD string, optional
     supplier_name = fields.Str(load_default=None)
     update_cost_price = fields.Bool(load_default=False)
 
@@ -62,3 +53,19 @@ class StockAuditItemSchema(Schema):
 class StockAuditSchema(Schema):
     items = fields.List(fields.Nested(StockAuditItemSchema), required=True, validate=validate.Length(min=1))
     notes = fields.Str(load_default=None)
+class ProductSchema(Schema):
+    product_id = fields.Int(dump_only=True)
+    store_id = fields.Int(dump_only=True)
+    category_id = fields.Int()
+    name = fields.Str()
+    sku_code = fields.Str()
+    uom = fields.Str()
+    cost_price = fields.Float()
+    selling_price = fields.Float()
+    current_stock = fields.Float()
+    reorder_level = fields.Float()
+    supplier_name = fields.Str()
+    barcode = fields.Str()
+    image_url = fields.Str()
+    is_active = fields.Bool()
+    lead_time_days = fields.Int()

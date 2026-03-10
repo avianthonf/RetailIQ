@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 from flask import g, request
 from marshmallow import ValidationError
@@ -6,95 +6,119 @@ from sqlalchemy import func
 
 from .. import db
 from ..auth.decorators import require_auth, require_role
-from ..auth.utils import format_response
 from ..models import Product, Transaction, TransactionItem
+from ..utils.responses import standard_json
+from ..utils.webhooks import broadcast_event
 from . import transactions_bp
 from .schemas import BatchTransactionCreateSchema, TransactionCreateSchema, TransactionReturnSchema
-from .services import process_batch_transactions, process_return_transaction, process_single_transaction
+from .services import (
+    get_daily_summary_data,
+    process_batch_transactions,
+    process_return_transaction,
+    process_single_transaction,
+)
 
 
-@transactions_bp.route('', methods=['POST'])
+@transactions_bp.route("", methods=["POST"])
 @require_auth
 def create_transaction():
     try:
-        data = TransactionCreateSchema().load(request.json)
+        data = TransactionCreateSchema().load(request.json or {})
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    store_id = g.current_user['store_id']
-    user_id = g.current_user['user_id']
-    role = g.current_user['role']
+    store_id = g.current_user["store_id"]
+    user_id = g.current_user["user_id"]
+    role = g.current_user["role"]
 
     session_id = None
-    if role == 'staff':
+    if role == "staff":
         from ..models import StaffSession
-        open_session = db.session.query(StaffSession).filter(
-            StaffSession.store_id == store_id,
-            StaffSession.user_id == user_id,
-            StaffSession.status == 'OPEN'
-        ).first()
+
+        open_session = (
+            db.session.query(StaffSession)
+            .filter(StaffSession.store_id == store_id, StaffSession.user_id == user_id, StaffSession.status == "OPEN")
+            .first()
+        )
         if open_session:
             session_id = open_session.id
 
     try:
         txn = process_single_transaction(data, store_id, session_id=session_id)
         db.session.commit()
-        return format_response(True, data={"transaction_id": str(txn.transaction_id)}), 201
+
+        # Broadcast Webhook Event
+        broadcast_event(
+            "transaction.created",
+            {
+                "transaction_id": str(txn.transaction_id),
+                "store_id": store_id,
+                "total": float(txn.total_amount),
+                "payment_mode": txn.payment_mode,
+            },
+            required_scope="read:sales",
+        )
+
+        return standard_json(data={"transaction_id": str(txn.transaction_id)}, status_code=201)
     except ValueError as e:
         db.session.rollback()
         if "Credit limit" in str(e):
-            return format_response(False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)}), 422
-        return format_response(False, error={"code": "BAD_REQUEST", "message": str(e)}), 400
+            return standard_json(success=False, message=str(e), status_code=422, error={"code": "UNPROCESSABLE_ENTITY"})
+        return standard_json(success=False, message=str(e), status_code=422, error={"code": "BAD_REQUEST"})
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return standard_json(success=False, message=str(e), status_code=500, error={"code": "SERVER_ERROR"})
 
-@transactions_bp.route('/batch', methods=['POST'])
+
+@transactions_bp.route("/batch", methods=["POST"])
 @require_auth
 def create_batch_transactions():
     try:
-        data = BatchTransactionCreateSchema().load(request.json)
+        data = BatchTransactionCreateSchema().load(request.json or {})
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    store_id = g.current_user['store_id']
-    user_id = g.current_user['user_id']
-    role = g.current_user['role']
+    store_id = g.current_user["store_id"]
+    user_id = g.current_user["user_id"]
+    role = g.current_user["role"]
 
     session_id = None
-    if role == 'staff':
+    if role == "staff":
         from ..models import StaffSession
-        open_session = db.session.query(StaffSession).filter(
-            StaffSession.store_id == store_id,
-            StaffSession.user_id == user_id,
-            StaffSession.status == 'OPEN'
-        ).first()
+
+        open_session = (
+            db.session.query(StaffSession)
+            .filter(StaffSession.store_id == store_id, StaffSession.user_id == user_id, StaffSession.status == "OPEN")
+            .first()
+        )
         if open_session:
             session_id = open_session.id
 
-    result = process_batch_transactions(data['transactions'], store_id, session_id=session_id)
+    result = process_batch_transactions(data["transactions"], store_id, session_id=session_id)
     db.session.commit()
-    return format_response(True, data=result), 200
+    return standard_json(data=result)
 
-@transactions_bp.route('', methods=['GET'])
+
+@transactions_bp.route("", methods=["GET"])
 @require_auth
 def get_transactions():
-    store_id = g.current_user['store_id']
-    role = g.current_user['role']
+    store_id = g.current_user["store_id"]
+    role = g.current_user["role"]
 
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', 50))
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    payment_mode = request.args.get('payment_mode')
-    customer_id = request.args.get('customer_id')
+    page = int(request.args.get("page", 1))
+    page_size = int(request.args.get("page_size", 50))
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    payment_mode = request.args.get("payment_mode")
+    customer_id = request.args.get("customer_id")
 
     query = db.session.query(Transaction).filter(Transaction.store_id == store_id)
 
-    if role == 'staff':
+    if role == "staff":
         # Enforce today only
-        today = date.today()
-        query = query.filter(func.date(Transaction.created_at) == today)
+        from datetime import datetime, timezone
+        today_date = datetime.now(timezone.utc).date()
+        query = query.filter(func.date(Transaction.created_at) == today_date)
     else:
         if start_date:
             query = query.filter(func.date(Transaction.created_at) >= start_date)
@@ -106,14 +130,20 @@ def get_transactions():
     if customer_id:
         query = query.filter(Transaction.customer_id == customer_id)
 
-    min_amount = request.args.get('min_amount')
-    max_amount = request.args.get('max_amount')
+    min_amount = request.args.get("min_amount")
+    max_amount = request.args.get("max_amount")
 
     if min_amount or max_amount:
-        amount_subq = db.session.query(
-            TransactionItem.transaction_id,
-            func.sum(TransactionItem.quantity * TransactionItem.selling_price - TransactionItem.discount_amount).label('total')
-        ).group_by(TransactionItem.transaction_id).subquery()
+        amount_subq = (
+            db.session.query(
+                TransactionItem.transaction_id,
+                func.sum(
+                    TransactionItem.quantity * TransactionItem.selling_price - TransactionItem.discount_amount
+                ).label("total"),
+            )
+            .group_by(TransactionItem.transaction_id)
+            .subquery()
+        )
 
         query = query.join(amount_subq, Transaction.transaction_id == amount_subq.c.transaction_id)
 
@@ -127,43 +157,42 @@ def get_transactions():
 
     result = []
     for t in transactions:
-        result.append({
-            "transaction_id": str(t.transaction_id),
-            "created_at": t.created_at.isoformat(),
-            "payment_mode": t.payment_mode,
-            "customer_id": t.customer_id,
-            "is_return": t.is_return,
-        })
+        result.append(
+            {
+                "transaction_id": str(t.transaction_id),
+                "created_at": t.created_at.isoformat(),
+                "payment_mode": t.payment_mode,
+                "customer_id": t.customer_id,
+                "is_return": t.is_return,
+            }
+        )
 
-    meta = {
-        "page": page,
-        "page_size": page_size,
-        "total": total
-    }
+    return standard_json(data=result, meta={"page": page, "page_size": page_size, "total": total})
 
-    return format_response(True, data=result, meta=meta), 200
 
-@transactions_bp.route('/<uuid:id>', methods=['GET'])
+@transactions_bp.route("/<uuid:id>", methods=["GET"])
 @require_auth
 def get_transaction(id):
-    store_id = g.current_user['store_id']
+    store_id = g.current_user["store_id"]
     txn = db.session.query(Transaction).filter_by(transaction_id=id, store_id=store_id).first()
 
     if not txn:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Transaction not found"}), 404
+        return standard_json(success=False, message="Transaction not found", status_code=404)
 
     items = db.session.query(TransactionItem).filter_by(transaction_id=txn.transaction_id).all()
 
     items_data = []
     for item in items:
         product = db.session.query(Product).filter_by(product_id=item.product_id).first()
-        items_data.append({
-            "product_id": item.product_id,
-            "product_name": product.name if product else None,
-            "quantity": float(item.quantity) if item.quantity else 0,
-            "selling_price": float(item.selling_price) if item.selling_price else 0,
-            "discount_amount": float(item.discount_amount) if item.discount_amount else 0,
-        })
+        items_data.append(
+            {
+                "product_id": item.product_id,
+                "product_name": product.name if product else None,
+                "quantity": float(item.quantity) if item.quantity else 0,
+                "selling_price": float(item.selling_price) if item.selling_price else 0,
+                "discount_amount": float(item.discount_amount) if item.discount_amount else 0,
+            }
+        )
 
     data = {
         "transaction_id": str(txn.transaction_id),
@@ -173,109 +202,46 @@ def get_transaction(id):
         "notes": txn.notes,
         "is_return": txn.is_return,
         "original_transaction_id": str(txn.original_transaction_id) if txn.original_transaction_id else None,
-        "line_items": items_data
+        "line_items": items_data,
     }
 
-    return format_response(True, data=data), 200
+    return standard_json(data=data)
 
-@transactions_bp.route('/<uuid:id>/return', methods=['POST'])
+
+@transactions_bp.route("/<uuid:id>/return", methods=["POST"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def return_transaction(id):
     try:
-        data = TransactionReturnSchema().load(request.json)
+        data = TransactionReturnSchema().load(request.json or {})
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    store_id = g.current_user['store_id']
+    store_id = g.current_user["store_id"]
 
     try:
         ret_txn = process_return_transaction(id, data, store_id)
         db.session.commit()
-        return format_response(True, data={"return_transaction_id": str(ret_txn.transaction_id)}), 201
+        return standard_json(data={"return_transaction_id": str(ret_txn.transaction_id)}, status_code=201)
     except ValueError as e:
         db.session.rollback()
-        return format_response(False, error={"code": "BAD_REQUEST", "message": str(e)}), 400
+        return standard_json(success=False, message=str(e), status_code=422, error={"code": "BAD_REQUEST"})
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return standard_json(success=False, message=str(e), status_code=500, error={"code": "SERVER_ERROR"})
 
-@transactions_bp.route('/summary/daily', methods=['GET'])
+
+@transactions_bp.route("/summary/daily", methods=["GET"])
 @require_auth
 def get_daily_summary():
-    store_id = g.current_user['store_id']
-    date_str = request.args.get('date', date.today().isoformat())
+    store_id = g.current_user["store_id"]
+    date_str = request.args.get("date", datetime.now(timezone.utc).date().isoformat())
 
     try:
-        target_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
-        return format_response(False, error={"code": "INVALID_DATE", "message": "Date must be YYYY-MM-DD"}), 400
+        return standard_json(success=False, message="Date must be YYYY-MM-DD", status_code=422, error={"code": "INVALID_DATE"})
 
-    query = db.session.query(Transaction).filter(
-        Transaction.store_id == store_id,
-        func.date(Transaction.created_at) == target_date
-    )
+    summary = get_daily_summary_data(store_id, target_date)
+    return standard_json(data=summary)
 
-    txns = query.all()
-    txn_ids = [t.transaction_id for t in txns]
-
-    returns_count = sum(1 for t in txns if t.is_return)
-    transaction_count = len(txns) - returns_count
-
-    revenue_by_mode = {}
-    items = []
-    if txn_ids:
-        items = db.session.query(TransactionItem).filter(TransactionItem.transaction_id.in_(txn_ids)).all()
-
-    total_rev = 0
-    total_cost = 0
-    product_sales = {}
-
-    txn_map = {t.transaction_id: t for t in txns}
-
-    for item in items:
-        txn = txn_map[item.transaction_id]
-
-        qty = float(item.quantity)
-        rev = qty * float(item.selling_price) - float(item.discount_amount)
-        cost = qty * float(item.cost_price_at_time) if item.cost_price_at_time else 0
-
-        mode = txn.payment_mode
-        revenue_by_mode[mode] = revenue_by_mode.get(mode, 0) + rev
-
-        # Don't add to product sales for returns (negative quantity), but we process revenue/cost directly
-        if not txn.is_return:
-            product_sales[item.product_id] = product_sales.get(item.product_id, 0) + qty
-            total_rev += rev
-            total_cost += cost
-        else:
-            # Returns are negative
-            total_rev += rev
-            total_cost += cost
-
-    gross_profit = total_rev - total_cost
-    avg_basket = total_rev / transaction_count if transaction_count > 0 else 0
-
-    top_product_ids = sorted(product_sales.keys(), key=lambda k: product_sales[k], reverse=True)[:5]
-    top_5_products = []
-    if top_product_ids:
-        products = db.session.query(Product).filter(Product.product_id.in_(top_product_ids)).all()
-        p_map = {p.product_id: p for p in products}
-        for pid in top_product_ids:
-            if pid in p_map:
-                top_5_products.append({
-                    "product_id": pid,
-                    "name": p_map[pid].name,
-                    "quantity_sold": product_sales[pid]
-                })
-
-    summary = {
-        "revenue_by_payment_mode": revenue_by_mode,
-        "top_5_products": top_5_products,
-        "transaction_count": transaction_count,
-        "avg_basket": avg_basket,
-        "gross_profit": gross_profit,
-        "returns_count": returns_count
-    }
-
-    return format_response(True, data=summary), 200

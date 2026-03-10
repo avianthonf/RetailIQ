@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retailiq-beat
+  labels:
+    app: retailiq
+    service: beat
+spec:
+  replicas: 1 # Strictly 1 for beat to avoid duplicate tasks
+  strategy:
+    type: Recreate # Better for beat to avoid overlap during update
+  selector:
+    matchLabels:
+      app: retailiq
+      service: beat
+  template:
+    metadata:
+      labels:
+        app: retailiq
+        service: beat
+    spec:
+      containers:
+      - name: beat
+        image: retailiq-api:latest
+        imagePullPolicy: Always
+        command: ["/usr/bin/python3", "-m", "celery", "-A", "celery_worker.celery_app", "beat", "-l", "info", "--schedule", "/tmp/celerybeat-schedule"]
+        envFrom:
+        - configMapRef:
+            name: retailiq-config
+        - secretRef:
+            name: retailiq-secrets
+        resources:
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+        - name: tmp-vol
+          mountPath: /tmp
+      volumes:
+      - name: tmp-vol
+        emptyDir: {}
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/master
+                operator: DoesNotExist

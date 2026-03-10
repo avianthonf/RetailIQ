@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retailiq-worker
+  labels:
+    app: retailiq
+    service: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: retailiq
+      service: worker
+  template:
+    metadata:
+      labels:
+        app: retailiq
+        service: worker
+    spec:
+      containers:
+      - name: worker
+        image: retailiq-api:latest
+        imagePullPolicy: Always
+        command: ["/usr/bin/python3", "-m", "celery", "-A", "celery_worker.celery_app", "worker", "-l", "info"]
+        envFrom:
+        - configMapRef:
+            name: retailiq-config
+        - secretRef:
+            name: retailiq-secrets
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000

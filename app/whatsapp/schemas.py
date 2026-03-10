@@ -8,8 +8,10 @@ class WhatsAppConfigUpsertSchema(Schema):
     is_active = fields.Boolean(required=False)
     waba_id = fields.String(required=False, allow_none=True)
 
+
 class SendAlertSchema(Schema):
     alert_id = fields.Integer(required=True)
+
 
 class SendPOSchema(Schema):
     po_id = fields.String(required=True)

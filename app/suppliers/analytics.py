@@ -15,15 +15,20 @@ def compute_supplier_fill_rate(supplier_id: UUID, store_id: int, days: int, db: 
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    row = db.session.query(
-        func.sum(PurchaseOrderItem.ordered_qty).label('total_ordered'),
-        func.sum(PurchaseOrderItem.received_qty).label('total_received')
-    ).join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id).filter(
-        PurchaseOrder.supplier_id == supplier_id,
-        PurchaseOrder.store_id == store_id,
-        PurchaseOrder.status == 'FULFILLED',
-        PurchaseOrder.updated_at >= cutoff
-    ).first()
+    row = (
+        db.session.query(
+            func.sum(PurchaseOrderItem.ordered_qty).label("total_ordered"),
+            func.sum(PurchaseOrderItem.received_qty).label("total_received"),
+        )
+        .join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrder.supplier_id == supplier_id,
+            PurchaseOrder.store_id == store_id,
+            PurchaseOrder.status == "FULFILLED",
+            PurchaseOrder.updated_at >= cutoff,
+        )
+        .first()
+    )
 
     if not row or not row.total_ordered or row.total_ordered == 0:
         return 1.0
@@ -36,14 +41,17 @@ def compute_avg_lead_time(supplier_id: UUID, store_id: int, db: SQLAlchemy) -> f
     Average days between PO creation and GRN receiving.
     Looks at all FULFILLED POs for this supplier.
     """
-    rows = db.session.query(
-        PurchaseOrder.created_at,
-        func.min(GoodsReceiptNote.received_at).label('received_at')
-    ).join(GoodsReceiptNote, GoodsReceiptNote.po_id == PurchaseOrder.id).filter(
-        PurchaseOrder.supplier_id == supplier_id,
-        PurchaseOrder.store_id == store_id,
-        PurchaseOrder.status == 'FULFILLED'
-    ).group_by(PurchaseOrder.id, PurchaseOrder.created_at).all()
+    rows = (
+        db.session.query(PurchaseOrder.created_at, func.min(GoodsReceiptNote.received_at).label("received_at"))
+        .join(GoodsReceiptNote, GoodsReceiptNote.po_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrder.supplier_id == supplier_id,
+            PurchaseOrder.store_id == store_id,
+            PurchaseOrder.status == "FULFILLED",
+        )
+        .group_by(PurchaseOrder.id, PurchaseOrder.created_at)
+        .all()
+    )
 
     if not rows:
         return None
@@ -66,20 +74,25 @@ def compute_price_change_pct(supplier_id: UUID, product_id: int, months: int, db
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
 
-    oldest = db.session.query(PurchaseOrderItem.unit_price).join(
-        PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id
-    ).filter(
-        PurchaseOrder.supplier_id == supplier_id,
-        PurchaseOrderItem.product_id == product_id,
-        PurchaseOrder.created_at >= cutoff
-    ).order_by(PurchaseOrder.created_at.asc()).first()
+    oldest = (
+        db.session.query(PurchaseOrderItem.unit_price)
+        .join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrder.supplier_id == supplier_id,
+            PurchaseOrderItem.product_id == product_id,
+            PurchaseOrder.created_at >= cutoff,
+        )
+        .order_by(PurchaseOrder.created_at.asc())
+        .first()
+    )
 
-    newest = db.session.query(PurchaseOrderItem.unit_price).join(
-        PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id
-    ).filter(
-        PurchaseOrder.supplier_id == supplier_id,
-        PurchaseOrderItem.product_id == product_id
-    ).order_by(PurchaseOrder.created_at.desc()).first()
+    newest = (
+        db.session.query(PurchaseOrderItem.unit_price)
+        .join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id)
+        .filter(PurchaseOrder.supplier_id == supplier_id, PurchaseOrderItem.product_id == product_id)
+        .order_by(PurchaseOrder.created_at.desc())
+        .first()
+    )
 
     if not oldest or not newest or not oldest.unit_price or not newest.unit_price:
         return None

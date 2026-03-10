@@ -1,8 +1,8 @@
 # RetailIQ — Retail Data Platform
 
-RetailIQ is a modular backend platform for retail operations intelligence. It is built as an **AWS-first, cloud-native application** deployed on **Amazon ECS Fargate** with a managed PostgreSQL (RDS) and Redis (ElastiCache) backend.
-
-It combines:
+RetailIQ is a **planet-scale retail operations intelligence platform**. It is built as a **multi-region, distributed application** deployed on **Kubernetes** with a global **CockroachDB** cluster and multi-region **Redis** caching. 
+ 
+ It is designed for **99.99% availability**, **p99 <50ms latency**, and **11 nines of data durability**.
 - transactional APIs (auth, store, inventory, transactions, customers),
 - analytics APIs backed by aggregate tables,
 - forecasting (store + SKU),
@@ -12,9 +12,11 @@ It combines:
 - barcode registry and receipt printing (barcode lookup, template management, async print jobs),
 - **loyalty & credit** (points-based loyalty programs, credit ledger, atomic POS integration),
 - **GST compliance** (HSN master, GSTIN validation, per-transaction GST recording, GSTR-1 generation),
-- **pricing engine** (competitive price drift detection, margin-optimized suggestions, weekly analysis),
-- **event-aware forecasting** (business event calendar, Prophet external regressors, demand sensing log),
-- **vision / OCR invoice processing** (Tesseract OCR, product fuzzy-matching, human review flow),
+- **pricing engine** (competitive price drift detection, margin-optimized suggestions, weekly analysis, **real-time market signal integration**, **Bayesian price elasticity modeling**),
+- **market intelligence** (real-time signal ingestion, price index computation, anomaly detection, sentiment analysis, WebSocket streaming),
+- **event-aware forecasting** (business event calendar, Prophet external regressors, demand sensing log, **Ensemble XGBoost/LSTM/Prophet engine**),
+- **vision / OCR invoice processing** (Tesseract OCR, product fuzzy-matching, human review flow, **YOLOv8 Shelf Analytics**, **TrOCR Receipt Digitization**, **Loss Prevention Detection**),
+- **Narrow Retail AI/ML Models** (LLaMA 7B RAG Assistant, Two-tower Recommendation Engine, Bayesian Dynamic Pricing, Deep Demand Forecasting),
 - **security hardening** (rate limiting, FK index audit, input sanitization, log redaction, slow-request detection),
 - asynchronous background processing with Celery.
 
@@ -61,7 +63,8 @@ For detailed AWS architecture, security, cost optimization, and CI/CD secrets se
 23. [CI/CD](#cicd)
 24. [Operations and Troubleshooting](#operations-and-troubleshooting)
 25. [Comprehensive Developer and Engineer Guide](#comprehensive-developer-and-engineer-guide)
-26. [Production Readiness Checklist](#production-readiness-checklist)
+26. [API Specification (OpenAPI)](#api-specification-openapi)
+27. [Production Readiness Checklist](#production-readiness-checklist)
 
 ---
 
@@ -82,38 +85,180 @@ RetailIQ is built as a Flask app using SQLAlchemy models and blueprint modules. 
 - **GST Compliance**: HSN code management, GSTIN validation (modulo-36 checksum), per-transaction CGST/SGST recording, GSTR-1 JSON generation, and liability slab analytics.
 - **WhatsApp Integration**: Outbound messaging (Alerts & Purchase Orders) via Meta Cloud API, secure Fernet token encryption at rest, and Meta webhook verification/handling.
 - **Chain Ownership**: Multi-store grouping, chain-wide KPI dashboards, store comparison matrix with relative coding, and automated inter-store transfer suggestions.
-- **Pricing Engine**: Competitive price drift detection via price elasticity proxy, margin-optimized RAISE/LOWER suggestions, configurable pricing rules, and weekly automated analysis.
+- **Pricing Engine**: Competitive price drift detection via price elasticity proxy, margin-optimized RAISE/LOWER suggestions, configurable pricing rules, and weekly automated analysis. Now enhanced with **Market Intelligence signals** for inflation-aware adjustments.
+- **Market Intelligence**: Real-time ingestion of supplier pricing, commodity indices, and consumer sentiment. Provides Fisher/Laspeyres price indices, anomaly detection (Isolation Forest), and sub-second signal streaming via WebSockets.
+- **Developer Platform**: Public API Ecosystem with OAuth 2.0 (RS256), API Key management.
+- **Usage Metering**: Precise tracking of API consumption for billing and quotas.
+- **Webhook Infrastructure**: Reliable, signed event delivery for third-party integrations.
+
+## 💳 Embedded Finance Platform (Team 2)
+
+RetailIQ is now a financial infrastructure layer for merchants, providing banking-as-a-service (BaaS) capabilities embedded directly into the retail workflow.
+
+### Architecture & Core Components
+
+- **Immutable Ledger**: A double-entry accounting engine (`app/finance/ledger.py`) that ensures all financial movements are balanced and auditable.
+- **Credit Scoring Engine**: Proprietary scoring (`app/finance/credit_scoring.py`) using RetailIQ transaction data, revenue velocity, and inventory turnover signals.
+- **Lending Infrastructure**: Full lifecycle management for term loans, lines of credit, and revenue advances.
+- **Payment Processing**: Integrated merchant settlements with automated fee deduction and ledger synchronization.
+- **Treasury Management**: Automated sweeps and yield accrual on merchant reserve accounts.
+- **Parametric Insurance**: Automated claims and payouts based on external triggers (e.g., weather-based business interruption).
+
+### Financial Data Model
+
+| Model | Purpose |
+|-------|---------|
+| `FinancialAccount` | Per-merchant accounts (Operating, Reserve, Revenue, Escrow). |
+| `LedgerEntry` | Atomic, balanced DEBIT/CREDIT pairs for all movements. |
+| `LoanApplication` | Tracks credit requests from application to payoff. |
+| `InsurancePolicy` | Parametric insurance enrollment and automated coverage. |
+| `MerchantCreditProfile` | Stores computed credit scores and risk factors. |
+
+### API Quick Start (`/api/v2/finance/`)
+
+- `GET /dashboard`: Aggregated financial health (cash-on-hand, total debt, credit score).
+- `POST /loans/apply`: Submit a request for credit using a `product_id`.
+- `PUT /treasury/sweep-config`: Configure automated treasury yield strategies.
+- `GET /ledger`: Access a complete auditable history of all account movements.
 
 ---
 
+## 🏢 B2B Wholesale Marketplace (Team 3)
+
+RetailIQ's B2B Wholesale Marketplace is a data-driven procurement platform connecting retailers directly with wholesalers and brands. Unlike standard catalogs, it uses ML/AI to recommend purchasing strategies and embeds finance options seamlessly via Team 2 integration.
+
+### Architecture & Core Components
+
+- **Supplier Directory (`app/marketplace/`)**: Registry of verified wholesalers, brands, and their master catalogs.
+- **Digital RFQ Engine**: End-to-end Request for Quote flow allowing retailers to negotiate terms and bulk discounts anonymously.
+- **AI Procurement Recommendations**: Deep continuous analysis of store inventory run-rates and localized demand to automatically suggest reorders.
+- **Unified Supplier Dashboard**: An analytics-heavy portal for suppliers to view pipeline momentum and analyze historical wholesale fulfillment metrics.
+- **Marketplace Core Models**: `SupplierProfile`, `CatalogItem`, `MarketplacePurchaseOrder`, `RFQ`, and `SupplierReview`.
+
+### API Quick Start (`/api/v1/marketplace/`)
+
+- `GET /directory`: Browse the global supplier directory and product catalogs.
+- `POST /rfqs`: Submit a new Request for Quote to a supplier for a specific SKU.
+- `POST /purchase-orders`: Submit a binding marketplace PO to a finalized supplier.
+- `GET /supplier/dashboard`: Fetch pipeline metrics, RFQ conversion rates, and total generated revenue (Supplier role only).
+
+---
+
+## 🚀 Deployment & Scaling
+
 ## Comprehensive System Architecture
 
-### High-level Components
-- **Flask API (Gunicorn)**: serves REST endpoints.
-- **PostgreSQL**: transactional + aggregate + forecast storage.
-- **Redis**:
-  - Celery broker,
-  - rate limiter storage,
-  - short-lived auth artifacts (OTP, reset, refresh token lookup),
-  - lightweight distributed locks for task idempotency.
-- **Celery Worker**: executes async jobs.
-- **Celery Beat**: schedules periodic jobs.
+### Planet-Scale Distributed Topology
+RetailIQ is evolving from a single-region ECS setup to a global, distributed architecture across 5+ regions (US-East, EU-West, AP-South, etc.).
 
-### Runtime Topology (`docker-compose.yml`)
-- `app`: API server container.
-- `postgres`: database.
-- `redis`: cache/broker.
-- `worker`: Celery worker process.
-- `beat`: Celery scheduler.
+#### High-level Components
+- **Global Load Balancer (CDN)**: Anycast global routing with edge caching (latency-based).
+- **Kubernetes Multi-Region (EKS/GKE)**:
+    - `api`: Flask Gunicorn app (Distroless runtime).
+    - `worker`: Distributed Celery workforce.
+    - `beat`: Highly available Celery scheduler.
+- **CockroachDB Cluster**: Multi-region distributed SQL with row-level geo-partitioning.
+- **Redis Cluster**: Global caching with local-read optimization.
+- **Kafka**: Real-time event streaming and message brokering.
 
-Startup behavior:
-1. `app` runs `scripts/start-app.sh`.
-2. Startup script ensures `.env` exists (copies from `.env.example` if missing).
-3. Waits for DB readiness (`scripts/wait_for_db.py`).
-4. Applies migrations (`alembic upgrade head`).
-5. Starts Gunicorn.
+### Observability Stack
+- **Prometheus + Grafana**: SLA monitoring (Availability, p99 Latency, Cost/1M requests).
+- **Jaeger**: Distributed tracing across regions.
+- **Loki**: Global log aggregation.
 
-This enables reliable first-run startup in Dockerized environments.
+### Runtime Hierarchy
+1. **Request Ingress**: Client -> Global LB -> Regional K8s Ingress -> API Pod.
+2. **State Management**: API Pod -> Regional Redis (Cache) / Global CockroachDB (Record).
+3. **Async Processing**: API Pod -> Kafka/Redis Broker -> Celery Worker.
+
+### Detailed Component Architecture
+```mermaid
+graph TD
+    subgraph "External Integration"
+        WA[WhatsApp Meta API]
+        GST[GSTN Portal]
+        INT[Market Intelligence Signals]
+    end
+
+    subgraph "API Layer (Flask/Gunicorn)"
+        AUTH[Auth/OAuth 2.0]
+        INV[Inventory/Store]
+        SALE[Transactions/Sales]
+        AI[AI v2/Vision/NLP]
+        DEV[Developer Portal]
+    end
+
+    subgraph "Logic & Processing"
+        RULE[Decision Engine]
+        FORE[Forecasting Prophet/XGBoost]
+        TASK[Celery Workers]
+    end
+
+    subgraph "Storage Layer"
+        CDB[(CockroachDB Global)]
+        RED[(Redis Multi-Region Cache)]
+    end
+
+    INT --> |Real-time| AUTH
+    AUTH --> CDB
+    INV --> CDB
+    SALE --> CDB
+    SALE --> |Events| TASK
+    TASK --> |Aggregate| CDB
+    TASK --> FORE
+    FORE --> |Cache| RED
+    DEV --> |Usage| CDB
+
+    subgraph "Modular Audit Framework (New)"
+        ROLE1[Security Tester]
+        ROLE2[Performance Eng]
+        ROLE3[Backend Architect]
+        ROLE4[QA Architect]
+        ROLE5[Reliability SRE]
+        ROLE1 & ROLE2 & ROLE3 & ROLE4 & ROLE5 -.-> |Brutal Audit| AUTH & INV & SALE & AI & TASK
+    end
+```
+
+### AI/ML Inference Architecture
+RetailIQ integrates specialized ML models for predictive insights:
+- **Demand Forecasting**: Uses an ensemble of **Facebook Prophet** and **XGBoost** to predict SKU-level demand. Models are trained asynchronously via Celery and cached in Redis.
+- **Vision Engine**: Employs **YOLOv8** for shelf analytics and **Tesseract OCR** for receipt digitization.
+- **Dynamic Pricing**: Uses **Bayesian elasticity modeling** to suggest price adjustments based on sales velocity and margin targets.
+
+### Financial Integrity: The Immutable Ledger
+The B2B Marketplace and Embedded Finance modules rely on a **double-entry immutable ledger**. Every credit movement or loan disbursement creates a balanced DEBIT/CREDIT pair, ensuring mathematical consistency and full auditability across all merchant accounts.
+
+---
+
+## Planet-Scale Infrastructure Transition (Phase 1)
+We are currently in **Phase 1: Foundation**. Highlights:
+- **Distroless Runtime**: Hardened production images using `gcr.io/distroless/python3`.
+- **Predictive AI:** ARIMA, Prophet, and specialized custom ML models for inventory and price forecasting
+- **Offline Reliability:** PWA sync layer, CockroachDB shadow replication
+- **Mobile Edge:** Kotlin Multiplatform (KMP), native SwiftUI iOS, Service Worker PWA, CRDT local database (SQLDelight)
+- **CockroachDB Shadow Replication**: Real-time CDC from legacy PostgreSQL 15.
+- **Full Observability**: Live metrics, traces, and logs in `/observability`.
+
+## 🏗️ Architecture
+
+RetailIQ uses a powerful modular architecture spanning backend microservices, planet-scale databases, and now a cross-platform mobile edge.
+
+### Core Backend Components
+- `app/models/` – SQLAlchemy schemas spanning users, products, transactions, analytics, and more.
+- `app/api_v2/` – The next-generation REST APIs with high-throughput optimizations.
+- `app/forecasting/` & `app/ai_v2/` – Predicts inventory depletion and recommends pricing using ML.
+- `app/sync/` - Conflict-free Replicated Data Type (CRDT) engine for edge offline-sync capabilities.
+
+### Mobile Edge Architecture (Team 7)
+The RetailIQ mobile stack relies on **Kotlin Multiplatform (KMP)**.
+- **Shared (`mobile/shared/`)**: Domain models, Ktor APIs, SQLDelight DB schema, CRDT Sync Engine, Koin DI, Auth.
+- **Android (`mobile/androidApp/`)**: Jetpack Compose reactive UI.
+- **iOS (`mobile/iosApp/`)**: SwiftUI with AVFoundation barcode scanning + Apple Push Notifications.
+- **Web (`mobile/pwa/`)**: React + TypeScript PWA featuring Service Workers, caching strategies, and indexedDB offline persistence.
+
+## 🚀 Getting Started
+
+### 1. Backend API (Python)
 
 ---
 
@@ -142,8 +287,13 @@ app/
   whatsapp/                  # Meta API client, message logs, secure config, templates
   chain/                     # store groups, chain dashboard, compare, transfers
   pricing/                   # pricing engine, suggestion API, rules, price history
+  market_intelligence/       # real-time signals, indices, anomaly detection, connectors, WS
   events/                    # business event calendar, demand sensing endpoint
   vision/                    # OCR invoice processing, parser, upload/confirm API
+  developer/                 # Developer registration, application management, API Gateway
+  api_v2/                    # Public Developer API (OAuth protected)
+  auth/oauth.py              # OAuth 2.0 Provider logic
+  utils/webhooks.py          # Webhook queuing and broadcasting utility
   utils/
     sanitize.py              # Input sanitization (strip + truncate) utility
 
@@ -167,13 +317,11 @@ tests/
 
 ## Request Lifecycle
 
-1. Request enters Flask via Gunicorn.
-2. Blueprint route validates payload via Marshmallow schemas.
-3. `require_auth` decodes JWT and attaches identity (`g.current_user`).
-4. Business logic executes via service layer and SQLAlchemy session.
-5. Data is committed/rolled back.
-6. Response is wrapped in standard response envelope in most modules.
-7. Non-critical background follow-ups (aggregates/alerts/etc.) are queued asynchronously.
+1. Request 3. Blueprint route validates payload via Marshmallow schemas and extracts context (`g.current_user`).
+4. **Service Layer Execution**: Routes delegate complex logic to `app/<module>/services.py` for better testability and reuse.
+5. **Unified Response Layer**: Every response is wrapped via `standard_json` to ensure a consistent API envelope.
+6. Data is committed/rolled back using SQLAlchemy sessions.
+7. Non-critical background follow-ups (aggregates/alerts/etc.) are queued asynchronously via Celery.
 
 ### Auth + Role Model
 - Authenticated identity includes `user_id`, `store_id`, `role`.
@@ -523,9 +671,29 @@ The `generate_price_suggestions(store_id, session)` function:
 ### Celery Task
 - **`run_weekly_pricing_analysis`** (Sunday 03:00): Iterates all stores, calls the pricing engine, and upserts PENDING suggestions. Skips if a PENDING suggestion for the same product already exists within 7 days (idempotency).
 
+
 ---
 
-## Configuration and Environment Variables
+## 21. Public Developer Platform & API Ecosystem
+
+RetailIQ is an **open platform** allowing third-party developers to build integrated solutions.
+
+### Core Components
+- **OAuth 2.0 Provider**: Secure authorization code and client credentials flows using RS256 JWT signing.
+- **API Gateway**: Centralized entry point (`/api/v2`) with Redis-backed rate limiting, usage metering, and scope validation.
+- **Webhook System**: Asynchronous event delivery (Celery) with HMAC-SHA256 signing, delivery logging, and exponential backoff retries.
+- **Developer Portal**: Self-service application management and API key generation.
+- **App Marketplace**: A directory of third-party applications integrated with RetailIQ.
+
+### Example: Consuming the Public API
+1. **Register** as a developer via `/api/v1/developer/register`.
+2. **Create an App** to get `client_id` and `client_secret`.
+3. **Obtain Token**: `POST /oauth/token` with `grant_type=client_credentials`.
+4. **Call API v2**: `GET /api/v2/inventory?store_id=1` with `Authorization: Bearer <token>`.
+
+---
+
+## 22. Configuration and Environment Variables
 Create `.env` for local overrides; in Docker, defaults from `.env.example` are loaded.
 
 Common variables:
@@ -619,7 +787,7 @@ Multi-step user journey tests that span multiple endpoints and simulate Celery t
 
 ## CI/CD
 
-### CI Pipeline (`.github/workflows/ci.yml`)
+### CI/CD Pipeline (`.github/workflows/ci.yml`)
 
 Runs on every push and PR. Six parallel jobs:
 
@@ -627,23 +795,17 @@ Runs on every push and PR. Six parallel jobs:
 |-----|---------|-----------|
 | 🔍 **Lint** | Ruff linter + format check | ✅ Yes |
 | 🛡️ **Security** | Bandit SAST scan + `pip-audit` CVE check | ⚠️ Advisory |
-| 🧪 **Test** | Full pytest suite (matrix: 3.10 + 3.11) with coverage | ✅ Yes |
-| 🐳 **Docker** | Validate `Dockerfile.prod` builds | ✅ Yes |
-| 📦 **Migration Check** | Detect un-generated Alembic migrations | ✅ Yes |
+| 🧪 **Test** | Full pytest suite with coverage (Distroless focus) | ✅ Yes |
+| 🐳 **Docker** | Multi-stage Distroless build validation | ✅ Yes |
+| 📦 **Migration Check** | Alembic migration detection | ✅ Yes |
 | ✅ **CI Pass** | Status gate for branch protection rules | ✅ Required |
 
-Features:
-- **Concurrency control**: duplicate CI runs on the same branch are cancelled.
-- **Coverage threshold**: fails if line coverage drops below 40%.
-- **Artifact uploads**: test results (JUnit XML), coverage reports, Bandit JSON.
-
-### Deploy Pipeline (`.github/workflows/deploy.yml`)
-
-Triggers on push to `main` or manual dispatch:
-1. **Test** → full pytest gate (skippable for emergency hotfixes).
-2. **Build & Push** → multi-stage Docker build with Buildx layer caching → ECR.
-3. **Deploy** → sequential rolling update: API → Worker → Beat (ECS Fargate).
-4. **Verify** → deployment summary + optional Slack notifications.
+### GitOps Deployment (`ArgoCD`)
+Deployments are managed via **GitOps** using ArgoCD:
+1. **Build & Push**: GitHub Actions builds the Distroless image and pushes to ECR.
+2. **Manifest Update**: CI updates the image tag in `k8s/overlays/<region>/kustomization.yaml`.
+3. **Sync**: ArgoCD detects the change and synchronizes the K8s clusters globally.
+4. **Validation**: Automated smoke tests run post-sync; automatic rollback if health checks fail.
 
 Branch protection recommended:
 - require **CI Pass** check before merge,
@@ -682,231 +844,203 @@ A startup banner logs the active configuration (with masked DB passwords) on boo
 1. **"STARTUP ABORTED — Missing or invalid configuration"**
    - Copy `.env.example` to `.env` and fill in production values.
    - Run `cp .env.example .env` and edit the file.
-2. **DB unavailable**
-   - check Postgres container health.
-   - inspect logs for `wait_for_db.py` timeout.
-3. **Migration failure**
-   - run `alembic upgrade head` manually.
-   - verify `DATABASE_URL` points to expected DB.
-4. **Redis broker errors**
-   - confirm `REDIS_URL` / `CELERY_BROKER_URL`.
-   - verify Redis service up.
 
-## Useful commands
+## API Specification (OpenAPI)
+
+RetailIQ provides a complete **OpenAPI 3.0** specification for all services.
+
+- **File**: [`openapi.json`](./openapi.json)
+- **Groups**:
+    - **v1**: Core Retail Operations (Auth, Inventory, Sales).
+    - **v2**: Developer & Partner APIs (OAuth 2.0 protected).
+    - **AI**: Vision, NLP, and Optimization endpoints.
+    - **OAuth**: Token exchange and authorization.
+
+You can import `openapi.json` into tools like **Postman**, **Insomnia**, or **Swagger UI** to explore and test the API.
+
+---
+
+## 🏗️ Comprehensive System Architecture
+
+RetailIQ is designed as a **Planet-Scale Modular Monolith**, strategically built to transition towards a globally distributed, high-performance architecture. OpenAPI generation scripts (`extract_routes.py` and `build_openapi.py`) automate API schemas directly from Flask blueprints.
+
+### Architectural Tiers
+
+1.  **Edge / Routing Layer (Global Load Balancing)**
+    *   **CDN & WAF**: Filters malicious traffic, terminates SSL, and routes users to the nearest regional deployment.
+    *   **API Gateway**: Handles rate limiting (`flask-limiter`), OAuth 2.0 token validation, and API usage metering.
+
+2.  **Application Layer (Flask/Gunicorn)**
+    *   **Stateless Micro-Services**: Built on Flask Blueprints, each representing a bounded context (e.g., `app/pricing`, `app/loyalty`, `app/finance`).
+    *   **Synchronous Processing**: Handles immediate transactional workloads like Point-of-Sale checkout, customer lookup, and inventory deduction.
+
+3.  **Asynchronous Processing Layer (Celery & Redis)**
+    *   **Message Broker (Redis)**: Queues heavy workloads to prevent blocking the API thread.
+    *   **Workers & Beat**: Executes background jobs such as Demand Forecasting (Prophet/XGBoost), OCR Invoice Processing (Tesseract), Weekly Pricing Analysis, and automated Treasury Sweeps.
+
+4.  **Storage & Persistence Layer**
+    *   **Global Record (PostgreSQL/CockroachDB)**: Stores all transactional models via SQLAlchemy ORM. Uses `begin_nested()` for atomic sub-transactions in batch operations.
+    *   **High-Speed Cache (Redis)**: Caches NLP intent responses, OAuth tokens, API rate limits, and short-term forecast structures.
+    *   **Blob Storage (S3)**: Stores uploaded receipts and OCR invoice images.
+    *   **Audit Logging**: Every price change and sensitive configuration update is immutable and tracked in history tables.
+
+### Data Flow Diagram
+
+```mermaid
+graph TD
+    User((Client Apps)) -->|REST / WS| Gateway[API Gateway & Rate Limiter]
+    Gateway --> Auth[Auth & OAuth 2.0]
+    Gateway --> CoreOps[Core Ops: Inventory, Sales, Finance]
+    
+    CoreOps --> DB[(CockroachDB / PostgreSQL)]
+    CoreOps --> Cache[(Redis Cluster)]
+    
+    CoreOps -->|Async Events| Broker[Celery Task Queue]
+    Broker --> Worker1[ML Forecasting Worker]
+    Broker --> Worker2[OCR & Vision Worker]
+    Broker --> Worker3[Analytics Aggregator]
+    
+    Worker1 --> DB
+    Worker2 --> DB
+    Worker3 --> DB
+```
+
+---
+
+## 25. Comprehensive Developer and Engineer Guide
+
+Welcome to the Developer and Engineer Guide for RetailIQ. This guide summarizes best practices when contributing to the codebase.
+
+### UTC Standardization and Timezones
+Given RetailIQ's multi-region architecture (planet-scale), date and time handling is critical.
+1. **Never use `date.today()` or `datetime.now()`**: These return timezone-naive objects dependent on the host machine's local timezone.
+2. **Always use UTC definitions**: Use `datetime.now(timezone.utc)` for exact times, and `datetime.now(timezone.utc).date()` for current dates.
+3. This applies to both production API routes (`app/`), background scheduled Celery tasks (`app/tasks/`), and all `pytest` testing suites (`tests/`).
+
+### Test Suite Execution
+RetailIQ enforces comprehensive test coverage to maintain production stability. A failing test will block the CI/CD deployment pipeline.
+- To execute the entire integration suite locally: `python -m pytest tests/ -v`
+- To run a specific test suite or test case in isolation: `python -m pytest tests/test_name.py::test_function -vv -s`
+- Avoid hardcoding values like `store_id=1` or `customer_id=1`. Instead, use dynamic SQLalchemy fixtures like `test_store.store_id`.
+
+#### 1.1 Testing Principles (RetailIQ Standard)
+All tests must be classified into one of three tiers during PR review:
+- **VITAL**: Protects security boundaries, transaction atomicity, or critical business logic. Must never be removed.
+- **REDUNDANT**: Tests language features or trivial getters. These should be removed to keep the CI pipeline fast.
+- **WEAK**: Tests that assert structure but not integrity (e.g., `len > 0` without value checks). These must be rewritten to VITAL.
+
+### 1. Development Environment Setup
 ```bash
-docker-compose logs -f app
-docker-compose logs -f worker
-docker-compose logs -f beat
+# Clone and setup the environment
+git clone <repo_url>
+cd RetailIQ
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# Unix/MacOS
+source .venv/bin/activate
+
+# Install all dependencies
+pip install -r requirements-dev.txt
+
+# Create your .env file
+cp .env.example .env
+
+# Run Alembic migrations to setup local DB
+alembic upgrade head
+
+# Start local server
+flask run
 ```
 
----
+### 2. Feature Implementation Lifecycle
 
-## Comprehensive Developer and Engineer Guide
+When adding a new module or feature, strictly follow this pattern:
+1.  **Define Models (`app/models/`)**: Create SQLAlchemy objects. Always use `db.Column` and ensure Foreign Keys have appropriate indexes.
+2.  **Generate Migration**: Run `alembic revision --autogenerate -m "Add feature"`. Review the generated migration script manually!
+3.  **Create Schemas (`app/<module>/schemas.py`)**: Use Marshmallow to define validation and serialization layers. **Never** trust raw incoming JSON.
+4.  **Implement Service Layer (`app/<module>/services.py`)**: Extract all non-trivial business logic, aggregations, and decision-making into a dedicated service file.
+5.  **Build Routes (`app/<module>/routes.py`)**: Add the Flask routes. Secure them with `@require_auth` or `@require_role('owner')`. **Always** return responses via the `standard_json` utility.
+6.  **Write Tests (`tests/`)**: Create a new `test_<module>.py` file. Run `pytest -q tests/test_<module>.py`.
 
-## 1) Adding a new endpoint
-- Create/extend module blueprint route.
-- Add schema validation and auth decorators.
-- Add/extend service logic.
-- Add tests under `tests/`.
+### 3. Core Engineering Standards
 
-## 2) Adding new background task
-- Implement in `app/tasks/tasks.py`.
-- Use `task_session` and idempotent lock when appropriate.
-- Add unit/integration tests.
-- If scheduled, register in `celery_worker.py` beat schedule.
+#### A. Security & Hardening
+*   **Zero Trust Inputs**: All free-text endpoints must pass through the `sanitize_string` utility to prevent XSS.
+*   **Standardized API Responses**: All API returns must use the `standard_json` wrapper from `app.utils.responses`.
+*   **Validation Errors**: Ensure all Marshmallow-raised validation errors consistently return an HTTP `422 Unprocessable Entity` state according to RESTful semantics instead of 400.
+*   **Logging**: Never log sensitive data. The application uses a custom `SensitiveDataFilter` to mask tokens and passwords.
+*   **Rate Limiting**: Apply explicit limits to new blueprints if they exceed the global default (e.g., `limiter.limit("10/minute")`).
 
-## 3) Changing DB schema
-- Update model.
-- Create Alembic migration.
-- Validate migration from empty DB + upgrade path from existing DB.
-- Add/adjust tests.
+#### B. Performance, Database, & Latency
+*   **The 200ms Rule**: No synchronous API request should take more than 200ms. If it does, offload it to Celery.
+*   **N+1 Queries**: Use `joinedload` or `selectinload` in SQLAlchemy to prevent N+1 query loops when fetching relationships.
+*   **Index Audits**: Ensure new tables with `user_id` or `store_id` have appropriate composite indexes.
+*   **Database Agnostic Functions**: Always import generic SQL functions like `func` directly from `sqlalchemy` (e.g., `func.sum`) instead of relying on `db.func` which may not be dynamically supported by all drivers or scoped sessions.
 
-## 4) Changing auth behavior
-- Keep token and Redis key strategy consistent across login/refresh/logout/verify-otp.
-- The `verify-otp` endpoint returns the same `AuthTokens` shape as `login` — any changes to the login response must be mirrored.
-- Refresh token rotation happens on every `/auth/refresh` call (old token is deleted from Redis, new one is issued).
-- Add lifecycle tests (rotation/replay/revocation).
+#### C. Asynchronous Tasks (Celery)
+*   Ensure all Celery tasks are **idempotent**. They may run multiple times if the message broker drops a connection.
+*   Use the `app.tasks.db_session.task_session()` context manager for all background DB operations to avoid orphaned transactions.
+*   **Webhook Delivery System**: All third-party webhook dispatches are handled asynchronously via Celery with exponential backoff and meticulous DB logging (`WebhookEvent`), tracking exact `last_response_code`, `delivery_url`, and `attempt_count` for unmatched reliability.
 
----
+#### D. Timezone & DateTime Handling
+*   **UTC Consistency**: Always use UTC-aware datetimes (`datetime.now(timezone.utc)`) within the application logic, databases, scheduling, and testing to prevent mismatches between multi-region environments. Do not use local `date.today()`.
 
-## Production Readiness Checklist
+### 4. CI/CD Pipeline & Code Quality
 
-Before deployment, ensure all are true:
-- [ ] `pytest -q` passes fully.
-- [ ] migrations apply cleanly on fresh DB and existing env.
-- [ ] secrets managed externally (no plaintext secrets in repo).
-- [ ] stable JWT key management strategy in place.
-- [ ] log aggregation and monitoring configured.
-- [x] rate limits applied on auth and all endpoints.
-- [x] sensitive data log filter in place.
-- [ ] backup/restore validated for PostgreSQL.
-- [x] rate limits and auth policies reviewed.
-- [ ] worker + beat autoscaling and queue policies defined.
-- [ ] rollback strategy documented.
+Deployments are governed by GitHub Actions. A PR will be blocked if any of the following fail:
+*   **Linter**: `ruff check .` must return 0 errors. Use `ruff format .` before pushing.
+*   **Unit Tests**: `pytest` must pass.
+*   **Type Checker**: Pyre2 type analysis.
+*   **Security Scan**: Bandit AST analysis for known Python vulnerabilities.
 
----
-
-## Event-Aware Forecasting Module
-
-The event-aware forecasting engine extends Prophet with a **business event calendar** so that upcoming holidays, promotions, and closures influence demand predictions as external regressors.
-
-### Architecture
-
-```
-GET /events                 →  list / filter events
-POST /events                →  create event
-PUT  /events/{id}           →  update event
-DELETE /events/{id}         →  delete event
-GET /events/upcoming?days=N →  next N days of events
-GET /forecasting/demand-sensing/{product_id}
-                            →  run event-adjusted forecast (14-day), log to demand_sensing_log
-```
-
-### How It Works
-
-1. **Event Registry** — `BusinessEvent` stores events with `start_date`, `end_date`, `event_type` (`HOLIDAY | FESTIVAL | PROMOTION | SALE_DAY | CLOSURE`), and optional `expected_impact_pct`.
-2. **Regressor Injection** — `generate_demand_forecast` fetches up to 5 events (highest absolute `expected_impact_pct`) that overlap the history + horizon window. Binary regressor columns (`event_<id8>`: `1.0` on event days, `0.0` otherwise) are injected into the Prophet DataFrame via `m.add_regressor()`.
-3. **Base vs Adjusted** — After Prophet prediction, `extra_regressors_additive` from the forecast is subtracted to yield `base_forecast`. Both are stored per-day.
-4. **Demand Sensing Log** — Each run writes to `demand_sensing_log` with `base_forecast`, `event_adjusted_forecast`, and the active events list as JSONB.
-5. **Fallback Safety** — If the history is below `MIN_DAYS_PROPHET` (35 days), the Ridge regression fallback is used and events are still recorded in the log (as active events metadata) but not applied as regressors.
-
-### Data Models
-
-| Table | Purpose |
-|---|---|
-| `business_events` | Event calendar per store |
-| `demand_sensing_log` | Per-day forecast snapshots with active events |
-| `event_impact_actuals` | Post-hoc measured impact of events on demand |
-
-### Regressor Cap
-
-To prevent Prophet from overfitting on sparse event data, a maximum of **5 regressors** are added per forecast run, chosen by highest absolute `|expected_impact_pct|`. Events with `NULL` impact are assigned a default behavioural `prior_scale=10.0`.
-
-### Migration
-
-Migration file: `migrations/versions/e7b8c9d0a1f2_events_tables.py`  
-Alembic chain: `chain_integration (64289450c79b)` → `pricing_tables (c3d91f2a7b44)` → **`events_tables (e7b8c9d0a1f2)`** (HEAD)
-
----
-## Vision / OCR Invoice Processing Module
-
-The Vision module lets store owners photograph supplier invoices and have Tesseract OCR extract line items automatically. Extracted entries are fuzzy-matched against the product catalogue using PostgreSQL `pg_trgm`, then presented for human review before stock is atomically updated.
-
-### Architecture
-
-```
-Upload Image ──▶ POST /vision/ocr/upload
-                 │  saves file to uploads/ocr/{store_id}/
-                 │  creates OcrJob (status=QUEUED)
-                 └─▶ Celery task: process_ocr_job
-                      │ pytesseract → raw text
-                      │ parse_invoice_text() → structured items
-                      │ pg_trgm similarity match → products
-                      └─▶ OcrJobItems created, job → REVIEW
-
-Review ──────────▶ GET  /vision/ocr/{job_id}           (poll status + items)
-Confirm ─────────▶ POST /vision/ocr/{job_id}/confirm   (atomic stock update)
-Dismiss ─────────▶ POST /vision/ocr/{job_id}/dismiss   (mark as FAILED)
-```
-
-### Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/v1/vision/ocr/upload` | Upload invoice image (`.jpg/.png/.jpeg`, ≤10 MB). Returns `job_id`. |
-| `GET`  | `/api/v1/vision/ocr/{job_id}` | Poll job status and extracted items with match confidence. |
-| `POST` | `/api/v1/vision/ocr/{job_id}/confirm` | Confirm items → atomic stock increase + `StockAdjustment` log. |
-| `POST` | `/api/v1/vision/ocr/{job_id}/dismiss` | Dismiss/reject the OCR result. |
-
-### Data Model (migration `31f7ac7d8d9a`)
-
-| Table | Purpose |
-|-------|---------|
-| `ocr_jobs` | Tracks each upload: image path, status (`QUEUED→PROCESSING→REVIEW→APPLIED\|FAILED`), raw OCR text. |
-| `ocr_job_items` | Individual line items: raw text, matched `product_id`, confidence, quantity, unit price. |
-| `vision_category_tags` | Category tags extracted from the invoice with confidence scores. |
-
-### Parser (`app/vision/parser.py`)
-
-Regex-based text parser handles: quantities with units (`pcs`, `kg`, `litre`, `pack`, `box`, `carton`, `dozen`), prices with `₹`/`Rs`/`Rs.` prefixes, comma-separated numbers, and multi-line product names.
-
-### Testing (10 tests in `tests/test_vision.py`)
-
-- **Parser**: basic extraction, comma prices, case-insensitive units, multi-line accumulation
-- **Upload API**: valid image → 201, oversized → 413, wrong MIME → 415
-- **OCR task**: simulated task creates items and transitions job to REVIEW
-- **Confirm**: atomic stock update verified; partial failure rolls back all changes
-
-### Security
-
-All endpoints require JWT auth (`@require_auth`). Job ownership is enforced via `store_id` comparison. OCR uploads are rate-limited to 20/hour per store.
+### 5. Deployment Checks
+Before pushing to production, verify:
+*   [ ] Alembic migrations apply cleanly.
+*   [ ] New environment variables are documented.
+*   [ ] AWS ECS Task Definitions reflect any new architecture components.
+*   [ ] Backwards-incompatible schema changes are mitigated with zero-downtime multi-phase migrations.
 
 ---
 
-## Security & Performance Hardening
+### 6. Modular Audit Framework
+RetailIQ now includes a suite of specialized audit prompts for brutal system reviews. These are located in `prompts/`:
+1. `pass_1_security_penetration_tester.txt`: Focused on auth, payments, and injection.
+2. `pass_2_performance_engineer.txt`: Targets N+1 queries and model latency.
+3. `pass_3_backend_architect_ddd.txt`: Enforces domain boundaries and separation of concerns.
+4. `pass_4_qa_architect_test_audit.txt`: Identifies coverage gaps and weak assertions.
+5. `pass_5_reliability_engineer_sre.txt`: Audits retries, timeouts, and failure resilience.
 
-The hardening pass adds cross-cutting security and performance controls without new features.
-
-### Rate Limiting
-
-| Endpoint | Limit | Key |
-|----------|-------|-----|
-| `POST /auth/register` | 5/hour | IP |
-| `POST /auth/login` | 10/minute | IP |
-| `POST /vision/ocr/upload` | 20/hour | `store_id` (from JWT) |
-| All other endpoints | 300/minute | IP (global default) |
-
-Powered by `flask-limiter` with Redis storage. Rate limiting is disabled in tests (`RATELIMIT_ENABLED=False`) except for the dedicated `test_login_rate_limit` test which uses a separate app fixture.
-
-### FK Index Audit (migration `f4a5b6c7d8e9`)
-
-35 indexes added to FK columns across all post-launch tables: `supplier_products`, `purchase_order_items`, `gst_transactions`, `loyalty_transactions`, `credit_transactions`, `ocr_job_items`, `ocr_jobs`, `vision_category_tags`, `whatsapp_templates`, `whatsapp_message_log`, `store_group_memberships`, `chain_daily_aggregates`, `inter_store_transfer_suggestions`, `business_events`, `demand_sensing_log`, `event_impact_actuals`, `stock_adjustments`, `stock_audit_items`, `product_price_history`, and more.
-
-### Input Sanitization
-
-- **OCR text truncation**: `parse_invoice_text()` truncates input to 50,000 characters to prevent DoS from huge payloads.
-- **Free-text fields**: `app/utils/sanitize.py` provides `sanitize_string(value, max_length)` which strips leading/trailing whitespace and truncates. Applied on supplier create/update (name 128, address 512) and PO notes.
-
-### Log Redaction (`SensitiveDataFilter`)
-
-A `logging.Filter` attached to the Flask app logger and the root logger redacts values matching `token`, `password`, `access_token`, or `secret` patterns with `***REDACTED***`. This prevents API keys and passwords from appearing in log files.
-
-### Slow Request Detection
-
-In development mode (`FLASK_ENV=development` and not `TESTING`):
-- `SQLALCHEMY_ECHO=True` logs all SQL queries.
-- An `@app.after_request` hook logs `[SLOW REQUEST] {method} {path} took {time}ms` for any response taking >500ms.
-
----
-
-## AWS Deployment & CI/CD
-
-RetailIQ is fully documented for production deployment on **AWS ECS Fargate**.
-
-The repository includes:
-- Multi-stage `Dockerfile.prod`
-- ECS Task Definitions (`aws/task-definitions/`)
-- IAM roles and CloudWatch alarms (`aws/iam/`, `aws/cloudwatch/`)
-- Full GitHub Actions CI/CD pipeline (`.github/workflows/deploy.yml`)
-
-For the comprehensive step-by-step guide, including architecture diagrams, cost optimization, security hardening, and troubleshooting, see the [**AWS Deployment Guide (DEPLOYMENT.md)**](./DEPLOYMENT.md).
+### 7. Core Engineering Principles
+- **Accuracy over Coverage**: 70% coverage with strict assertions is better than 100% with weak ones.
+- **Fail Fast**: The application refuses to start in production if critical secrets or configs are default/weak.
+- **Observability is Priority**: Every new service must include structured logging and health checks.
 
 ---
 
 ## Contributing
-
-
-1. Create a branch.
-2. Implement code + tests.
-3. Run `pytest -q`.
-4. Open PR with:
-   - summary,
-   - migration impact,
-   - test evidence,
-   - rollout notes.
+1. Create a branch (`feature/your-feature-name`).
+2. Implement code + tests. Ensure code coverage remains high.
+3. Open a Pull Request detailing the architecture impact, database changes, and rollback plan.
 
 ---
 
 ## License
+This project is proprietary software for RetailIQ.
 
-This project is open source under the MIT License (see `LICENSE` if present).
+
+## Comprehensive Developer and Engineer Guide
+
+### Architecture Overviews
+RetailIQ operates on a monolithic-first design extending into microservices seamlessly using Celery. For a full architectural breakdown see [System Overview](#system-overview).
+
+### Setting Up For Development
+1. Clone the repository.
+2. Use docker-compose up --build or activate a virtualenv config.
+3. Refer to .env.example to build your local .env. Ensure that you generate strong JWT_PRIVATE_KEY and JWT_PUBLIC_KEY mock values.
+4. Database migrations run via Alembic (lembic upgrade head).
+
+### Contributing Guidelines
+All PRs require strict linting (Ruff), security audits (Bandit), and comprehensive Pytest pass rates. No undocumented endpoints will be merged. Use standard standard_json responses universally.
+

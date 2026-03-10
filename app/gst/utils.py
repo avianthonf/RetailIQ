@@ -8,11 +8,12 @@ Indian GSTIN structure (15 characters):
   [13]   'Z' (default)
   [14]   Checksum (modulo-36 based)
 """
+
 import re
 
-_GSTIN_RE = re.compile(r'^[0-3][0-9][A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$')
+_GSTIN_RE = re.compile(r"^[0-3][0-9][A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$")
 
-_CHARSET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 def _char_value(ch: str) -> int:

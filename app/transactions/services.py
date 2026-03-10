@@ -15,23 +15,20 @@ def _dispatch_async(task, *args):
     try:
         task.delay(*args)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Background task dispatch failed for %s args=%s: %s", getattr(task, 'name', task), args, exc)
+        logger.warning("Background task dispatch failed for %s args=%s: %s", getattr(task, "name", task), args, exc)
 
 
 def process_single_transaction(data, store_id, is_batch=False, session_id=None):
     # Check idempotency
-    existing_txn = db.session.query(Transaction).filter_by(transaction_id=data['transaction_id']).first()
+    existing_txn = db.session.query(Transaction).filter_by(transaction_id=data["transaction_id"]).first()
     if existing_txn:
         if is_batch:
             return None
         else:
             raise ValueError("Transaction ID already exists")
 
-    product_ids = [item['product_id'] for item in data['line_items']]
-    products = db.session.query(Product).filter(
-        Product.store_id == store_id,
-        Product.product_id.in_(product_ids)
-    ).all()
+    product_ids = [item["product_id"] for item in data["line_items"]]
+    products = db.session.query(Product).filter(Product.store_id == store_id, Product.product_id.in_(product_ids)).all()
     product_map = {p.product_id: p for p in products}
 
     missing_products = set(product_ids) - set(product_map.keys())
@@ -39,31 +36,34 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
         raise ValueError(f"Products not found: {missing_products}")
 
     txn = Transaction(
-        transaction_id=data['transaction_id'],
+        transaction_id=data["transaction_id"],
         store_id=store_id,
-        customer_id=data.get('customer_id'),
-        payment_mode=data['payment_mode'],
-        notes=data.get('notes'),
-        created_at=data['timestamp'].replace(tzinfo=timezone.utc) if data['timestamp'].tzinfo is None else data['timestamp'],
+        customer_id=data.get("customer_id"),
+        payment_mode=data["payment_mode"],
+        notes=data.get("notes"),
+        created_at=data["timestamp"].replace(tzinfo=timezone.utc)
+        if data["timestamp"].tzinfo is None
+        else data["timestamp"],
         is_return=False,
-        session_id=session_id
+        session_id=session_id,
     )
     db.session.add(txn)
 
     grand_total = 0
-    for item in data['line_items']:
-        product = product_map[item['product_id']]
+    for item in data["line_items"]:
+        product = product_map[item["product_id"]]
         from decimal import Decimal
-        if product.current_stock is None:
-            product.current_stock = Decimal('0')
 
-        product.current_stock -= Decimal(str(item['quantity']))
+        if product.current_stock is None:
+            product.current_stock = Decimal("0")
+
+        product.current_stock -= Decimal(str(item["quantity"]))
         if product.current_stock < 0:
             print(f"WARNING: Product {product.product_id} stock went negative: {product.current_stock}")
 
-        qty = item['quantity']
-        selling_price = item['selling_price']
-        discount = item.get('discount_amount', 0)
+        qty = item["quantity"]
+        selling_price = item["selling_price"]
+        discount = item.get("discount_amount", 0)
         grand_total += (qty * selling_price) - discount
 
         txn_item = TransactionItem(
@@ -73,16 +73,18 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
             selling_price=selling_price,
             original_price=float(product.selling_price) if product.selling_price else selling_price,
             discount_amount=discount,
-            cost_price_at_time=float(product.cost_price) if product.cost_price else 0
+            cost_price_at_time=float(product.cost_price) if product.cost_price else 0,
         )
         db.session.add(txn_item)
 
     from decimal import Decimal
-    payment_mode = data.get('payment_mode')
-    customer_id = data.get('customer_id')
 
-    if payment_mode == 'CREDIT' and customer_id:
+    payment_mode = data.get("payment_mode")
+    customer_id = data.get("customer_id")
+
+    if payment_mode == "CREDIT" and customer_id:
         from ..models import CreditLedger, CreditTransaction
+
         ledger = db.session.query(CreditLedger).filter_by(customer_id=customer_id, store_id=store_id).first()
         if not ledger:
             ledger = CreditLedger(customer_id=customer_id, store_id=store_id)
@@ -98,20 +100,25 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
         ctxn = CreditTransaction(
             ledger_id=ledger.id,
             transaction_id=txn.transaction_id,
-            type='CREDIT_SALE',
+            type="CREDIT_SALE",
             amount=grand_total,
             balance_after=ledger.balance,
-            notes=f"Credit sale for transaction {txn.transaction_id}"
+            notes=f"Credit sale for transaction {txn.transaction_id}",
         )
         db.session.add(ctxn)
 
     if customer_id:
         from ..models import CustomerLoyaltyAccount, LoyaltyProgram, LoyaltyTransaction
+
         program = db.session.query(LoyaltyProgram).filter_by(store_id=store_id, is_active=True).first()
         if program:
             points_earned = Decimal(str(grand_total)) * Decimal(str(program.points_per_rupee))
             if points_earned > 0:
-                account = db.session.query(CustomerLoyaltyAccount).filter_by(customer_id=customer_id, store_id=store_id).first()
+                account = (
+                    db.session.query(CustomerLoyaltyAccount)
+                    .filter_by(customer_id=customer_id, store_id=store_id)
+                    .first()
+                )
                 if not account:
                     account = CustomerLoyaltyAccount(customer_id=customer_id, store_id=store_id)
                     db.session.add(account)
@@ -125,39 +132,40 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
                 ltxn = LoyaltyTransaction(
                     account_id=account.id,
                     transaction_id=txn.transaction_id,
-                    type='EARN',
+                    type="EARN",
                     points=points_earned,
                     balance_after=account.total_points,
-                    notes=f"Earned from transaction {txn.transaction_id}"
+                    notes=f"Earned from transaction {txn.transaction_id}",
                 )
                 db.session.add(ltxn)
 
     # ── GST Transaction Recording ───────────────────────────────────
     from ..models import Category, HSNMaster, StoreGSTConfig
     from ..models import GSTTransaction as GSTTxn
-    gst_config = db.session.query(StoreGSTConfig).filter_by(store_id=store_id, is_gst_enabled=True).first()
-    if gst_config and gst_config.registration_type == 'REGULAR':
-        hsn_breakdown = {}
-        total_taxable = Decimal('0')
-        total_cgst = Decimal('0')
-        total_sgst = Decimal('0')
-        total_igst = Decimal('0')
 
-        for item in data['line_items']:
-            product = product_map[item['product_id']]
-            qty = Decimal(str(item['quantity']))
-            sp = Decimal(str(item['selling_price']))
-            disc = Decimal(str(item.get('discount_amount', 0)))
+    gst_config = db.session.query(StoreGSTConfig).filter_by(store_id=store_id, is_gst_enabled=True).first()
+    if gst_config and gst_config.registration_type == "REGULAR":
+        hsn_breakdown = {}
+        total_taxable = Decimal("0")
+        total_cgst = Decimal("0")
+        total_sgst = Decimal("0")
+        total_igst = Decimal("0")
+
+        for item in data["line_items"]:
+            product = product_map[item["product_id"]]
+            qty = Decimal(str(item["quantity"]))
+            sp = Decimal(str(item["selling_price"]))
+            disc = Decimal(str(item.get("discount_amount", 0)))
             line_total = qty * sp - disc
 
             # Skip exempt/zero GST categories
-            cat = product.gst_category or 'REGULAR'
-            if cat in ('EXEMPT', 'ZERO'):
+            cat = product.gst_category or "REGULAR"
+            if cat in ("EXEMPT", "ZERO"):
                 continue
 
             # Determine GST rate: product HSN rate or category rate
-            gst_rate = Decimal('0')
-            hsn_code_val = product.hsn_code or 'NONE'
+            gst_rate = Decimal("0")
+            hsn_code_val = product.hsn_code or "NONE"
             if product.hsn_code:
                 hsn_entry = db.session.query(HSNMaster).filter_by(hsn_code=product.hsn_code).first()
                 if hsn_entry and hsn_entry.default_gst_rate:
@@ -177,22 +185,20 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
             # Intrastate: CGST = SGST = tax / 2
             cgst = tax / 2
             sgst = tax / 2
-            Decimal('0')
+            Decimal("0")
 
             total_taxable += taxable
             total_cgst += cgst
             total_sgst += sgst
 
             if hsn_code_val not in hsn_breakdown:
-                hsn_breakdown[hsn_code_val] = {
-                    'taxable': 0, 'cgst': 0, 'sgst': 0, 'igst': 0, 'rate': float(gst_rate)
-                }
-            hsn_breakdown[hsn_code_val]['taxable'] += float(round(taxable, 2))
-            hsn_breakdown[hsn_code_val]['cgst'] += float(round(cgst, 2))
-            hsn_breakdown[hsn_code_val]['sgst'] += float(round(sgst, 2))
+                hsn_breakdown[hsn_code_val] = {"taxable": 0, "cgst": 0, "sgst": 0, "igst": 0, "rate": float(gst_rate)}
+            hsn_breakdown[hsn_code_val]["taxable"] += float(round(taxable, 2))
+            hsn_breakdown[hsn_code_val]["cgst"] += float(round(cgst, 2))
+            hsn_breakdown[hsn_code_val]["sgst"] += float(round(sgst, 2))
 
         if total_taxable > 0 or total_cgst > 0:
-            period_str = txn.created_at.strftime('%Y-%m')
+            period_str = txn.created_at.strftime("%Y-%m")
             gst_txn_row = GSTTxn(
                 transaction_id=txn.transaction_id,
                 store_id=store_id,
@@ -202,15 +208,17 @@ def process_single_transaction(data, store_id, is_batch=False, session_id=None):
                 sgst_amount=round(total_sgst, 2),
                 igst_amount=round(total_igst, 2),
                 total_gst=round(total_cgst + total_sgst + total_igst, 2),
-                hsn_breakdown=hsn_breakdown
+                hsn_breakdown=hsn_breakdown,
             )
             db.session.add(gst_txn_row)
 
-    date_str = txn.created_at.strftime('%Y-%m-%d')
+    date_str = txn.created_at.strftime("%Y-%m-%d")
     _dispatch_async(rebuild_daily_aggregates, store_id, date_str)
     _dispatch_async(evaluate_alerts, store_id)
 
+    txn.total_amount = grand_total
     return txn
+
 
 def process_batch_transactions(transactions_data, store_id, session_id=None):
     accepted = 0
@@ -225,18 +233,13 @@ def process_batch_transactions(transactions_data, store_id, session_id=None):
                     accepted += 1
         except Exception as e:
             rejected += 1
-            errors.append({"transaction_id": str(t_data.get('transaction_id')), "error": str(e)})
+            errors.append({"transaction_id": str(t_data.get("transaction_id")), "error": str(e)})
 
-    return {
-        "accepted": accepted,
-        "rejected": rejected,
-        "errors": errors
-    }
+    return {"accepted": accepted, "rejected": rejected, "errors": errors}
+
 
 def process_return_transaction(original_txn_id, return_data, store_id):
-    original_txn = db.session.query(Transaction).filter_by(
-        transaction_id=original_txn_id, store_id=store_id
-    ).first()
+    original_txn = db.session.query(Transaction).filter_by(transaction_id=original_txn_id, store_id=store_id).first()
 
     if not original_txn:
         raise ValueError("Original transaction not found or does not belong to this store")
@@ -251,23 +254,20 @@ def process_return_transaction(original_txn_id, return_data, store_id):
         notes=f"Return for {original_txn_id}",
         created_at=datetime.now(timezone.utc),
         is_return=True,
-        original_transaction_id=original_txn_id
+        original_transaction_id=original_txn_id,
     )
     db.session.add(ret_txn)
 
-    product_ids = [item['product_id'] for item in return_data['items']]
-    products = db.session.query(Product).filter(
-        Product.store_id == store_id,
-        Product.product_id.in_(product_ids)
-    ).all()
+    product_ids = [item["product_id"] for item in return_data["items"]]
+    products = db.session.query(Product).filter(Product.store_id == store_id, Product.product_id.in_(product_ids)).all()
     product_map = {p.product_id: p for p in products}
 
     original_items = db.session.query(TransactionItem).filter_by(transaction_id=original_txn_id).all()
     orig_item_map = {item.product_id: item for item in original_items}
 
-    for item_data in return_data['items']:
-        product_id = item_data['product_id']
-        qty_returned = item_data['quantity_returned']
+    for item_data in return_data["items"]:
+        product_id = item_data["product_id"]
+        qty_returned = item_data["quantity_returned"]
 
         if product_id not in orig_item_map:
             raise ValueError(f"Product {product_id} not in original transaction")
@@ -280,8 +280,9 @@ def process_return_transaction(original_txn_id, return_data, store_id):
         product = product_map.get(product_id)
         if product:
             from decimal import Decimal
+
             if product.current_stock is None:
-                product.current_stock = Decimal('0')
+                product.current_stock = Decimal("0")
             product.current_stock += Decimal(str(qty_returned))
 
         ret_txn_item = TransactionItem(
@@ -291,11 +292,76 @@ def process_return_transaction(original_txn_id, return_data, store_id):
             selling_price=orig_item.selling_price,
             original_price=orig_item.original_price,
             discount_amount=0,
-            cost_price_at_time=orig_item.cost_price_at_time
+            cost_price_at_time=orig_item.cost_price_at_time,
         )
         db.session.add(ret_txn_item)
 
-    date_str = ret_txn.created_at.strftime('%Y-%m-%d')
+    date_str = ret_txn.created_at.strftime("%Y-%m-%d")
     _dispatch_async(rebuild_daily_aggregates, store_id, date_str)
 
     return ret_txn
+
+
+def get_daily_summary_data(store_id, target_date):
+    from sqlalchemy import func
+
+    query = db.session.query(Transaction).filter(
+        Transaction.store_id == store_id, func.date(Transaction.created_at) == target_date
+    )
+
+    txns = query.all()
+    txn_ids = [t.transaction_id for t in txns]
+
+    returns_count = sum(1 for t in txns if t.is_return)
+    transaction_count = len(txns) - returns_count
+
+    revenue_by_mode = {}
+    items = []
+    if txn_ids:
+        items = db.session.query(TransactionItem).filter(TransactionItem.transaction_id.in_(txn_ids)).all()
+
+    total_rev = 0
+    total_cost = 0
+    product_sales = {}
+
+    txn_map = {t.transaction_id: t for t in txns}
+
+    for item in items:
+        txn = txn_map[item.transaction_id]
+
+        qty = float(item.quantity)
+        rev = qty * float(item.selling_price) - float(item.discount_amount)
+        cost = qty * float(item.cost_price_at_time) if item.cost_price_at_time else 0
+
+        mode = txn.payment_mode
+        revenue_by_mode[mode] = revenue_by_mode.get(mode, 0) + rev
+
+        if not txn.is_return:
+            product_sales[item.product_id] = product_sales.get(item.product_id, 0) + qty
+            total_rev += rev
+            total_cost += cost
+        else:
+            total_rev += rev
+            total_cost += cost
+
+    gross_profit = total_rev - total_cost
+    avg_basket = total_rev / transaction_count if transaction_count > 0 else 0
+
+    top_product_ids = sorted(product_sales.keys(), key=lambda k: product_sales[k], reverse=True)[:5]
+    top_5_products = []
+    if top_product_ids:
+        products = db.session.query(Product).filter(Product.product_id.in_(top_product_ids)).all()
+        p_map = {p.product_id: p for p in products}
+        for pid in top_product_ids:
+            if pid in p_map:
+                top_5_products.append({"product_id": pid, "name": p_map[pid].name, "quantity_sold": product_sales[pid]})
+
+    return {
+        "revenue_by_payment_mode": revenue_by_mode,
+        "top_5_products": top_5_products,
+        "transaction_count": transaction_count,
+        "avg_basket": avg_basket,
+        "gross_profit": gross_profit,
+        "returns_count": returns_count,
+    }
+

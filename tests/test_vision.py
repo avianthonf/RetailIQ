@@ -19,6 +19,7 @@ def test_parse_invoice_text_basic():
     assert items[1]["unit"] == "kg"
     assert items[1]["unit_price"] == 500.0
 
+
 def test_parse_handles_comma_prices():
     """Test comma handling and decimals in price"""
     text = "Luxury Watch 1 pcs ₹1,200.50"
@@ -29,6 +30,7 @@ def test_parse_handles_comma_prices():
     assert items[0]["quantity"] == 1.0
     assert items[0]["unit_price"] == 1200.5
 
+
 def test_parse_handles_case_insensitive_units():
     """Test variations in unit casing"""
     text = "Item A 1 Pcs ₹10\nItem B 2 pCS Rs 20\nItem C 3 KG ₹30"
@@ -38,6 +40,7 @@ def test_parse_handles_case_insensitive_units():
     assert items[0]["unit"] == "pcs"
     assert items[1]["unit"] == "pcs"
     assert items[2]["unit"] == "kg"
+
 
 def test_parse_invoice_text_multi_line():
     """Test multi-line item accumulation where name wraps before qty/price"""
@@ -54,6 +57,7 @@ def test_parse_invoice_text_multi_line():
     assert items[1]["quantity"] == 1.0
     assert items[1]["unit_price"] == 50.0
 
+
 import io
 from unittest.mock import patch
 
@@ -62,46 +66,53 @@ from app.models import OcrJob, OcrJobItem, Product, StockAdjustment
 from app.tasks.tasks import process_ocr_job
 
 
-@patch('app.vision.routes.process_ocr_job')
+@patch("app.vision.routes.process_ocr_job")
 def test_upload_valid_image_creates_job(mock_task, client, owner_headers):
-    data = {'invoice_image': (io.BytesIO(b"fake image data"), 'invoice.jpg')}
-    res = client.post('/api/v1/vision/ocr/upload', headers=owner_headers, data=data, content_type='multipart/form-data')
+    data = {"invoice_image": (io.BytesIO(b"fake image data"), "invoice.jpg")}
+    res = client.post("/api/v1/vision/ocr/upload", headers=owner_headers, data=data, content_type="multipart/form-data")
     assert res.status_code == 201
     assert "job_id" in res.json
 
     # Check if job was created
     job_id = res.json["job_id"]
     import uuid
+
     job = db.session.get(OcrJob, uuid.UUID(job_id))
     assert job is not None
-    assert job.status == 'QUEUED'
+    assert job.status == "QUEUED"
 
-@patch('app.vision.routes.process_ocr_job')
+
+@patch("app.vision.routes.process_ocr_job")
 def test_upload_oversized_rejected(mock_task, client, owner_headers):
     # Create 11MB file
     large_data = b"0" * (11 * 1024 * 1024)
-    data = {'invoice_image': (io.BytesIO(large_data), 'invoice.jpg')}
-    res = client.post('/api/v1/vision/ocr/upload', headers=owner_headers, data=data, content_type='multipart/form-data')
+    data = {"invoice_image": (io.BytesIO(large_data), "invoice.jpg")}
+    res = client.post("/api/v1/vision/ocr/upload", headers=owner_headers, data=data, content_type="multipart/form-data")
     assert res.status_code == 413
     assert "Payload Too Large" in res.json["message"]
 
-@patch('app.vision.routes.process_ocr_job')
+
+@patch("app.vision.routes.process_ocr_job")
 def test_upload_wrong_mime_rejected(mock_task, client, owner_headers):
-    data = {'invoice_image': (io.BytesIO(b"fake text data"), 'invoice.txt')}
-    res = client.post('/api/v1/vision/ocr/upload', headers=owner_headers, data=data, content_type='multipart/form-data')
+    data = {"invoice_image": (io.BytesIO(b"fake text data"), "invoice.txt")}
+    res = client.post("/api/v1/vision/ocr/upload", headers=owner_headers, data=data, content_type="multipart/form-data")
     assert res.status_code == 415
     assert "Unsupported Media Type" in res.json["message"]
 
-@patch('app.vision.routes.process_ocr_job')
-@patch('pytesseract.image_to_string')
-@patch('PIL.Image.open')
-def test_ocr_task_creates_items_and_transitions_to_review(mock_open, mock_tesseract, mock_task, client, owner_headers, test_store):
+
+@patch("app.vision.routes.process_ocr_job")
+@patch("pytesseract.image_to_string")
+@patch("PIL.Image.open")
+def test_ocr_task_creates_items_and_transitions_to_review(
+    mock_open, mock_tesseract, mock_task, client, owner_headers, test_store
+):
     """
     Integration test: simulates the OCR task's effect by directly inserting
     items into the DB (since the Celery task uses its own raw SQL session
     that doesn't share the Flask test transaction).
     """
     import uuid as _uuid
+
     store_id = test_store.store_id
     dummy_text = "Coffee Beans 10 kg Rs 500\nSugar 5 kg ₹200"
     mock_tesseract.return_value = dummy_text
@@ -113,47 +124,49 @@ def test_ocr_task_creates_items_and_transitions_to_review(mock_open, mock_tesser
     db.session.commit()
 
     # Create job via API
-    data = {'invoice_image': (io.BytesIO(b"fake image data"), 'invoice.jpg')}
-    res = client.post('/api/v1/vision/ocr/upload', headers=owner_headers, data=data, content_type='multipart/form-data')
+    data = {"invoice_image": (io.BytesIO(b"fake image data"), "invoice.jpg")}
+    res = client.post("/api/v1/vision/ocr/upload", headers=owner_headers, data=data, content_type="multipart/form-data")
     job_id = res.json["job_id"]
 
     import uuid
+
     job = db.session.get(OcrJob, uuid.UUID(job_id))
     assert job is not None
-    assert job.status == 'QUEUED'
+    assert job.status == "QUEUED"
 
     # Simulate what the Celery task does: parse text, create items, transition to REVIEW
     from app.vision.parser import parse_invoice_text
+
     parsed_items = parse_invoice_text(dummy_text)
     assert len(parsed_items) == 2
 
     job.raw_ocr_text = dummy_text
-    job.status = 'REVIEW'
+    job.status = "REVIEW"
 
     # Simulate matched items
     products_map = {"Coffee Beans": p1, "Sugar": p2}
     for item in parsed_items:
         matched_product = None
         for key, prod in products_map.items():
-            if key.lower() in item['product_name'].lower():
+            if key.lower() in item["product_name"].lower():
                 matched_product = prod
                 break
 
         ocr_item = OcrJobItem(
             id=_uuid.uuid4(),
             job_id=job.id,
-            raw_text=item['product_name'],
+            raw_text=item["product_name"],
             matched_product_id=matched_product.product_id if matched_product else None,
             confidence=85.0 if matched_product else 0.0,
-            quantity=item['quantity'],
-            unit_price=item['unit_price']
+            quantity=item["quantity"],
+            unit_price=item["unit_price"],
         )
         db.session.add(ocr_item)
 
     db.session.commit()
 
     # Verify final state
-    assert job.status == 'REVIEW'
+    assert job.status == "REVIEW"
     assert job.raw_ocr_text == dummy_text
 
     items = db.session.query(OcrJobItem).filter_by(job_id=uuid.UUID(job_id)).all()
@@ -166,15 +179,17 @@ def test_ocr_task_creates_items_and_transitions_to_review(mock_open, mock_tesser
     for item in items:
         assert item.confidence > 0
 
+
 def test_confirm_updates_stock_atomically(client, owner_headers, test_store):
     import uuid
+
     store_id = test_store.store_id
     p1 = Product(store_id=store_id, name="Test Item 1", sku_code="T1", current_stock=10)
     p2 = Product(store_id=store_id, name="Test Item 2", sku_code="T2", current_stock=20)
     db.session.add_all([p1, p2])
     db.session.commit()
 
-    job = OcrJob(id=uuid.uuid4(), store_id=store_id, status='REVIEW')
+    job = OcrJob(id=uuid.uuid4(), store_id=store_id, status="REVIEW")
     db.session.add(job)
     db.session.commit()
 
@@ -190,28 +205,30 @@ def test_confirm_updates_stock_atomically(client, owner_headers, test_store):
         ]
     }
 
-    res = client.post(f'/api/v1/vision/ocr/{job.id}/confirm', headers=owner_headers, json=payload)
+    res = client.post(f"/api/v1/vision/ocr/{job.id}/confirm", headers=owner_headers, json=payload)
     assert res.status_code == 200
 
     db.session.refresh(job)
     db.session.refresh(p1)
     db.session.refresh(p2)
 
-    assert job.status == 'APPLIED'
+    assert job.status == "APPLIED"
     assert p1.current_stock == 15
     assert p2.current_stock == 30
 
     txs = db.session.query(StockAdjustment).filter(StockAdjustment.reason.like(f"%{str(job.id)}%")).all()
     assert len(txs) == 2
 
+
 def test_confirm_rolls_back_on_partial_failure(client, owner_headers, test_store):
     import uuid
+
     store_id = test_store.store_id
     p1 = Product(store_id=store_id, name="Fail Test 1", sku_code="F1", current_stock=10)
     db.session.add(p1)
     db.session.commit()
 
-    job = OcrJob(id=uuid.uuid4(), store_id=store_id, status='REVIEW')
+    job = OcrJob(id=uuid.uuid4(), store_id=store_id, status="REVIEW")
     db.session.add(job)
     db.session.commit()
 
@@ -223,7 +240,7 @@ def test_confirm_rolls_back_on_partial_failure(client, owner_headers, test_store
     payload = {
         "confirmed_items": [
             {"item_id": str(i1.id), "matched_product_id": p1.product_id, "quantity": 5},
-            {"item_id": str(uuid.uuid4()), "matched_product_id": 9999, "quantity": -5}, # Invalid
+            {"item_id": str(uuid.uuid4()), "matched_product_id": 9999, "quantity": -5},  # Invalid
         ]
     }
 
@@ -231,7 +248,7 @@ def test_confirm_rolls_back_on_partial_failure(client, owner_headers, test_store
     p1_id = p1.product_id
     job_id = job.id
 
-    res = client.post(f'/api/v1/vision/ocr/{job_id}/confirm', headers=owner_headers, json=payload)
+    res = client.post(f"/api/v1/vision/ocr/{job_id}/confirm", headers=owner_headers, json=payload)
     assert res.status_code == 400
 
     db.session.expire_all()
@@ -239,6 +256,5 @@ def test_confirm_rolls_back_on_partial_failure(client, owner_headers, test_store
     p1_fresh = db.session.get(Product, p1_id)
     job_fresh = db.session.get(OcrJob, job_id)
 
-    assert p1_fresh.current_stock == 10 # Rolled back!
-    assert job_fresh.status == 'REVIEW' # Not applied!
-
+    assert p1_fresh.current_stock == 10  # Rolled back!
+    assert job_fresh.status == "REVIEW"  # Not applied!

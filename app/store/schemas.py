@@ -5,9 +5,9 @@ class StoreProfileSchema(Schema):
     store_id = fields.Int(dump_only=True)
     owner_user_id = fields.Int(dump_only=True)
     store_name = fields.Str(validate=validate.Length(min=1, max=100))
-    store_type = fields.Str(validate=validate.OneOf(
-        ['grocery', 'pharmacy', 'general', 'electronics', 'clothing', 'other']
-    ))
+    store_type = fields.Str(
+        validate=validate.OneOf(["grocery", "pharmacy", "general", "electronics", "clothing", "other"])
+    )
     city = fields.Str(validate=validate.Length(max=100))
     state = fields.Str(validate=validate.Length(max=100))
     gst_number = fields.Str(validate=validate.Length(max=15))

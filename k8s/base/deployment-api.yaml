@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retailiq-api
+  labels:
+    app: retailiq
+    service: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: retailiq
+      service: api
+  template:
+    metadata:
+      labels:
+        app: retailiq
+        service: api
+    spec:
+      containers:
+      - name: api
+        image: retailiq-api:latest # To be replaced by CI
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+        envFrom:
+        - configMapRef:
+            name: retailiq-config
+        - secretRef:
+            name: retailiq-secrets
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: service
+                  operator: In
+                  values:
+                  - api
+              topologyKey: "kubernetes.io/hostname"

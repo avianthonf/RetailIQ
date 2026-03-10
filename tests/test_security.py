@@ -6,6 +6,7 @@ Tests:
   2. test_store_scoping_on_all_new_endpoints — verify cross-store isolation
   3. test_sensitive_fields_not_in_logs — verify log redaction of tokens/secrets
 """
+
 import io
 import logging
 
@@ -16,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 
 # Re-use the SQLite type shims (idempotent — if conftest already ran, these are no-ops)
 try:
+
     @compiles(JSONB, "sqlite")
     def _jsonb(type_, compiler, **kw):
         return "JSON"
@@ -33,20 +35,23 @@ from app.models import Base, Category, Product, Store, Supplier, User
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="function")
 def rate_limit_app():
     """App with rate limiting ENABLED (separate from the shared conftest app)."""
-    app = create_app({
-        "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-        "SQLALCHEMY_ENGINE_OPTIONS": {
-            "connect_args": {"check_same_thread": False},
-            "poolclass": StaticPool,
-        },
-        "CELERY_ALWAYS_EAGER": True,
-        "RATELIMIT_ENABLED": True,
-        "RATELIMIT_STORAGE_URI": "memory://",
-    })
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SQLALCHEMY_ENGINE_OPTIONS": {
+                "connect_args": {"check_same_thread": False},
+                "poolclass": StaticPool,
+            },
+            "CELERY_ALWAYS_EAGER": True,
+            "RATELIMIT_ENABLED": True,
+            "RATELIMIT_STORAGE_URI": "memory://",
+        }
+    )
     with app.app_context():
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
@@ -81,6 +86,7 @@ def _make_store_and_owner(store_name, mobile):
     _db.session.commit()
 
     import bcrypt
+
     pw = bcrypt.hashpw(b"Password1!", bcrypt.gensalt(4)).decode()
     user = User(
         mobile_number=mobile,
@@ -102,10 +108,18 @@ def _make_store_and_owner(store_name, mobile):
 # 1) RATE LIMIT TEST
 # ══════════════════════════════════════════════════════════════════════════════
 
-def test_login_rate_limit(rl_client, rate_limit_app):
+
+def test_login_rate_limit(rl_client, rate_limit_app, monkeypatch):
     """Call login 11 times in quick succession — the 11th should get 429."""
+    from unittest.mock import MagicMock
+
+    mock_redis = MagicMock()
+    monkeypatch.setattr("app.auth.utils.get_redis_client", lambda: mock_redis)
+    monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: mock_redis)
+
     with rate_limit_app.app_context():
         import bcrypt
+
         pw = bcrypt.hashpw(b"test123", bcrypt.gensalt(4)).decode()
         s = Store(store_name="RateLimitStore", store_type="grocery")
         _db.session.add(s)
@@ -135,6 +149,7 @@ def test_login_rate_limit(rl_client, rate_limit_app):
 # ══════════════════════════════════════════════════════════════════════════════
 # 2) STORE SCOPING TEST
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def test_store_scoping_on_all_new_endpoints(client, app):
     """
@@ -210,6 +225,7 @@ def test_store_scoping_on_all_new_endpoints(client, app):
 # 3) SENSITIVE DATA LOG REDACTION TEST
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def test_sensitive_fields_not_in_logs(client, app):
     """
     PUT /whatsapp/config with an access_token value.
@@ -247,9 +263,7 @@ def test_sensitive_fields_not_in_logs(client, app):
             log_output = log_capture.getvalue()
 
             # The raw token value must NOT appear in logs
-            assert secret_token not in log_output, (
-                f"Secret token was found in logs! Log content:\n{log_output[:500]}"
-            )
+            assert secret_token not in log_output, f"Secret token was found in logs! Log content:\n{log_output[:500]}"
         finally:
             app.logger.removeHandler(handler)
             logging.getLogger().removeHandler(handler)
@@ -259,29 +273,31 @@ def test_sensitive_fields_not_in_logs(client, app):
 # 4) STARTUP VALIDATION TESTS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def test_production_refuses_to_start_without_secret_key():
     """
     In production mode, create_app must raise RuntimeError if SECRET_KEY
     is missing or set to a weak default.
     """
     import os
-    old_env = os.environ.get('FLASK_ENV')
-    old_secret = os.environ.get('SECRET_KEY')
+
+    old_env = os.environ.get("FLASK_ENV")
+    old_secret = os.environ.get("SECRET_KEY")
     try:
-        os.environ['FLASK_ENV'] = 'production'
-        os.environ['SECRET_KEY'] = 'dev-secret-change-in-production'
-        with pytest.raises(RuntimeError, match='SECRET_KEY'):
-            create_app({'TESTING': False})
+        os.environ["FLASK_ENV"] = "production"
+        os.environ["SECRET_KEY"] = "dev-secret-change-in-production"
+        with pytest.raises(RuntimeError, match="SECRET_KEY"):
+            create_app({"TESTING": False})
     finally:
         # Restore environment
         if old_env is not None:
-            os.environ['FLASK_ENV'] = old_env
+            os.environ["FLASK_ENV"] = old_env
         else:
-            os.environ.pop('FLASK_ENV', None)
+            os.environ.pop("FLASK_ENV", None)
         if old_secret is not None:
-            os.environ['SECRET_KEY'] = old_secret
+            os.environ["SECRET_KEY"] = old_secret
         else:
-            os.environ.pop('SECRET_KEY', None)
+            os.environ.pop("SECRET_KEY", None)
 
 
 def test_production_refuses_default_db_credentials():
@@ -291,28 +307,34 @@ def test_production_refuses_default_db_credentials():
     """
     import os
     import secrets as _secrets
-    old_env = os.environ.get('FLASK_ENV')
-    old_secret = os.environ.get('SECRET_KEY')
-    old_db = os.environ.get('DATABASE_URL')
-    old_redis = os.environ.get('REDIS_URL')
-    old_broker = os.environ.get('CELERY_BROKER_URL')
-    old_jwt_priv = os.environ.get('JWT_PRIVATE_KEY')
-    old_jwt_pub = os.environ.get('JWT_PUBLIC_KEY')
+
+    old_env = os.environ.get("FLASK_ENV")
+    old_secret = os.environ.get("SECRET_KEY")
+    old_db = os.environ.get("DATABASE_URL")
+    old_redis = os.environ.get("REDIS_URL")
+    old_broker = os.environ.get("CELERY_BROKER_URL")
+    old_jwt_priv = os.environ.get("JWT_PRIVATE_KEY")
+    old_jwt_pub = os.environ.get("JWT_PUBLIC_KEY")
     try:
-        os.environ['FLASK_ENV'] = 'production'
-        os.environ['SECRET_KEY'] = _secrets.token_urlsafe(64)
-        os.environ['DATABASE_URL'] = 'postgresql://retailiq:retailiq@localhost:5432/retailiq'
-        os.environ['REDIS_URL'] = 'redis://localhost:6379/0'
-        os.environ['CELERY_BROKER_URL'] = 'redis://localhost:6379/1'
-        os.environ['JWT_PRIVATE_KEY'] = 'dummy-key'
-        os.environ['JWT_PUBLIC_KEY'] = 'dummy-key'
-        with pytest.raises(RuntimeError, match='default dev credentials'):
-            create_app({'TESTING': False})
+        os.environ["FLASK_ENV"] = "production"
+        os.environ["SECRET_KEY"] = _secrets.token_urlsafe(64)
+        os.environ["DATABASE_URL"] = "postgresql://retailiq:retailiq@localhost:5432/retailiq"
+        os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+        os.environ["CELERY_BROKER_URL"] = "redis://localhost:6379/1"
+        os.environ["JWT_PRIVATE_KEY"] = "dummy-key"
+        os.environ["JWT_PUBLIC_KEY"] = "dummy-key"
+        with pytest.raises(RuntimeError, match="default dev credentials"):
+            create_app({"TESTING": False})
     finally:
-        for k, v in [('FLASK_ENV', old_env), ('SECRET_KEY', old_secret),
-                      ('DATABASE_URL', old_db), ('REDIS_URL', old_redis),
-                      ('CELERY_BROKER_URL', old_broker),
-                      ('JWT_PRIVATE_KEY', old_jwt_priv), ('JWT_PUBLIC_KEY', old_jwt_pub)]:
+        for k, v in [
+            ("FLASK_ENV", old_env),
+            ("SECRET_KEY", old_secret),
+            ("DATABASE_URL", old_db),
+            ("REDIS_URL", old_redis),
+            ("CELERY_BROKER_URL", old_broker),
+            ("JWT_PRIVATE_KEY", old_jwt_priv),
+            ("JWT_PUBLIC_KEY", old_jwt_pub),
+        ]:
             if v is not None:
                 os.environ[k] = v
             else:
@@ -325,22 +347,25 @@ def test_development_mode_starts_with_defaults():
     env vars (uses defaults and auto-generates JWT keys).
     """
     import os
-    old_env = os.environ.get('FLASK_ENV')
+
+    old_env = os.environ.get("FLASK_ENV")
     try:
-        os.environ['FLASK_ENV'] = 'development'
-        app = create_app({
-            'TESTING': True,
-            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-            'SQLALCHEMY_ENGINE_OPTIONS': {
-                'connect_args': {'check_same_thread': False},
-                'poolclass': StaticPool,
-            },
-        })
+        os.environ["FLASK_ENV"] = "development"
+        app = create_app(
+            {
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+                "SQLALCHEMY_ENGINE_OPTIONS": {
+                    "connect_args": {"check_same_thread": False},
+                    "poolclass": StaticPool,
+                },
+            }
+        )
         assert app is not None
-        assert app.config.get('JWT_PRIVATE_KEY')
-        assert app.config.get('JWT_PUBLIC_KEY')
+        assert app.config.get("JWT_PRIVATE_KEY")
+        assert app.config.get("JWT_PUBLIC_KEY")
     finally:
         if old_env is not None:
-            os.environ['FLASK_ENV'] = old_env
+            os.environ["FLASK_ENV"] = old_env
         else:
-            os.environ.pop('FLASK_ENV', None)
+            os.environ.pop("FLASK_ENV", None)

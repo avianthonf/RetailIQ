@@ -1,0 +1,5 @@
+resources:
+  - deployment-api.yaml
+  - service-api.yaml
+  - deployment-worker.yaml
+  - deployment-beat.yaml

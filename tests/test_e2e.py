@@ -48,6 +48,7 @@ from app.models import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _owner_headers(user, store):
     """Build Authorization header for an owner."""
     token = generate_access_token(user.user_id, store.store_id, "owner")
@@ -85,7 +86,8 @@ def _rebuild_aggregates_inline(store_id, target_date):
     date_str = str(target_date)
 
     # ── daily_store_summary ──────────────────────────────────────────
-    row = _db.session.execute(text("""
+    row = _db.session.execute(
+        text("""
         SELECT
             COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0) AS revenue,
             COALESCE(SUM(ti.quantity * (ti.selling_price - ti.cost_price_at_time) - ti.discount_amount), 0) AS profit,
@@ -93,14 +95,18 @@ def _rebuild_aggregates_inline(store_id, target_date):
             COALESCE(SUM(ti.quantity), 0) AS units_sold
         FROM transactions t
         JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
-        WHERE t.store_id = :sid AND DATE(t.created_at) = :d AND t.is_return = FALSE
-    """), {"sid": store_id, "d": date_str}).fetchone()
+        WHERE t.store_id = :sid AND t.created_at >= :start_d AND t.created_at < :end_d AND t.is_return = 0
+    """),
+        {
+            "sid": store_id,
+            "start_d": str(target_date),
+            "end_d": str(target_date + timedelta(days=1))
+        },
+    ).fetchone()
 
     if row and row.txn_count > 0:
         avg_basket = float(row.revenue) / row.txn_count
-        existing = _db.session.query(DailyStoreSummary).filter_by(
-            store_id=store_id, date=target_date
-        ).first()
+        existing = _db.session.query(DailyStoreSummary).filter_by(store_id=store_id, date=target_date).first()
         if existing:
             existing.revenue = float(row.revenue)
             existing.profit = float(row.profit)
@@ -108,15 +114,21 @@ def _rebuild_aggregates_inline(store_id, target_date):
             existing.avg_basket = avg_basket
             existing.units_sold = float(row.units_sold)
         else:
-            _db.session.add(DailyStoreSummary(
-                store_id=store_id, date=target_date,
-                revenue=float(row.revenue), profit=float(row.profit),
-                transaction_count=row.txn_count, avg_basket=avg_basket,
-                units_sold=float(row.units_sold),
-            ))
+            _db.session.add(
+                DailyStoreSummary(
+                    store_id=store_id,
+                    date=target_date,
+                    revenue=float(row.revenue),
+                    profit=float(row.profit),
+                    transaction_count=row.txn_count,
+                    avg_basket=avg_basket,
+                    units_sold=float(row.units_sold),
+                )
+            )
 
     # ── daily_sku_summary ────────────────────────────────────────────
-    sku_rows = _db.session.execute(text("""
+    sku_rows = _db.session.execute(
+        text("""
         SELECT
             ti.product_id,
             COALESCE(SUM(ti.quantity * ti.selling_price - ti.discount_amount), 0) AS revenue,
@@ -126,25 +138,39 @@ def _rebuild_aggregates_inline(store_id, target_date):
                  THEN SUM(ti.quantity * ti.selling_price) / SUM(ti.quantity) ELSE 0 END AS avg_price
         FROM transactions t
         JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
-        WHERE t.store_id = :sid AND DATE(t.created_at) = :d AND t.is_return = FALSE
+        WHERE t.store_id = :sid AND t.created_at >= :start_d AND t.created_at < :end_d AND t.is_return = 0
         GROUP BY ti.product_id
-    """), {"sid": store_id, "d": date_str}).fetchall()
+    """),
+        {
+            "sid": store_id,
+            "start_d": str(target_date),
+            "end_d": str(target_date + timedelta(days=1))
+        },
+    ).fetchall()
 
     for sr in sku_rows:
-        existing = _db.session.query(DailySkuSummary).filter_by(
-            store_id=store_id, date=target_date, product_id=sr.product_id
-        ).first()
+        existing = (
+            _db.session.query(DailySkuSummary)
+            .filter_by(store_id=store_id, date=target_date, product_id=sr.product_id)
+            .first()
+        )
         if existing:
             existing.revenue = float(sr.revenue)
             existing.profit = float(sr.profit)
             existing.units_sold = float(sr.units_sold)
             existing.avg_selling_price = float(sr.avg_price)
         else:
-            _db.session.add(DailySkuSummary(
-                store_id=store_id, date=target_date, product_id=sr.product_id,
-                revenue=float(sr.revenue), profit=float(sr.profit),
-                units_sold=float(sr.units_sold), avg_selling_price=float(sr.avg_price),
-            ))
+            _db.session.add(
+                DailySkuSummary(
+                    store_id=store_id,
+                    date=target_date,
+                    product_id=sr.product_id,
+                    revenue=float(sr.revenue),
+                    profit=float(sr.profit),
+                    units_sold=float(sr.units_sold),
+                    avg_selling_price=float(sr.avg_price),
+                )
+            )
 
     _db.session.commit()
 
@@ -155,30 +181,41 @@ def _evaluate_alerts_inline(store_id):
     """
     from sqlalchemy import text
 
-    low_rows = _db.session.execute(text("""
+    low_rows = _db.session.execute(
+        text("""
         SELECT product_id, name, current_stock, reorder_level
         FROM products
         WHERE store_id = :sid AND is_active = TRUE AND current_stock <= reorder_level
-    """), {"sid": store_id}).fetchall()
+    """),
+        {"sid": store_id},
+    ).fetchall()
 
     for r in low_rows:
         # Only create if no existing LOW_STOCK alert for this product
-        existing = _db.session.query(Alert).filter_by(
-            store_id=store_id, alert_type="LOW_STOCK", product_id=r.product_id
-        ).filter(Alert.resolved_at.is_(None)).first()
+        existing = (
+            _db.session.query(Alert)
+            .filter_by(store_id=store_id, alert_type="LOW_STOCK", product_id=r.product_id)
+            .filter(Alert.resolved_at.is_(None))
+            .first()
+        )
         if not existing:
-            _db.session.add(Alert(
-                store_id=store_id, alert_type="LOW_STOCK", priority="CRITICAL",
-                product_id=r.product_id,
-                message=f"Low stock: '{r.name}' has {float(r.current_stock):.2f} units.",
-                created_at=datetime.now(timezone.utc),
-            ))
+            _db.session.add(
+                Alert(
+                    store_id=store_id,
+                    alert_type="LOW_STOCK",
+                    priority="CRITICAL",
+                    product_id=r.product_id,
+                    message=f"Low stock: '{r.name}' has {float(r.current_stock):.2f} units.",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
     _db.session.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  1) test_full_retail_day
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def test_full_retail_day(client, app, test_store, test_owner, owner_headers, test_category):
     """
@@ -193,20 +230,27 @@ def test_full_retail_day(client, app, test_store, test_owner, owner_headers, tes
     with app.app_context():
         headers = owner_headers
         sid = test_store.store_id
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
 
         # ── b. Create 3 products ────────────────────────────────────────
         products = []
         for name, cost, sell, stock in [
-            ("Apples",  40, 60,  100),
-            ("Bread",   20, 35,   50),
-            ("Cheese", 100, 150,  10),   # low initial stock → will deplete below reorder
+            ("Apples", 40, 60, 100),
+            ("Bread", 20, 35, 50),
+            ("Cheese", 100, 150, 10),  # low initial stock → will deplete below reorder
         ]:
-            resp = client.post("/api/v1/inventory/products", headers=headers, json={
-                "name": name, "cost_price": cost, "selling_price": sell,
-                "current_stock": stock, "reorder_level": 15,
-                "category_id": test_category.category_id,
-            })
+            resp = client.post(
+                "/api/v1/inventory/products",
+                headers=headers,
+                json={
+                    "name": name,
+                    "cost_price": cost,
+                    "selling_price": sell,
+                    "current_stock": stock,
+                    "reorder_level": 15,
+                    "category_id": test_category.category_id,
+                },
+            )
             assert resp.status_code == 201, f"Failed to create {name}: {resp.json}"
             products.append(resp.json["data"]["product_id"])
 
@@ -214,13 +258,13 @@ def test_full_retail_day(client, app, test_store, test_owner, owner_headers, tes
 
         # ── c. Record 5 sales ───────────────────────────────────────────
         sale_payloads = [
-            _make_txn_payload(pid_apples, 5,  60, "CASH"),
-            _make_txn_payload(pid_apples, 3,  60, "UPI"),
-            _make_txn_payload(pid_bread,  10, 35, "CASH"),
-            _make_txn_payload(pid_cheese, 8,  150, "UPI"),     # drops cheese to 2
-            _make_txn_payload(pid_bread,  2,  35, "CASH"),
+            _make_txn_payload(pid_apples, 5, 60, "CASH"),
+            _make_txn_payload(pid_apples, 3, 60, "UPI"),
+            _make_txn_payload(pid_bread, 10, 35, "CASH"),
+            _make_txn_payload(pid_cheese, 8, 150, "UPI"),  # drops cheese to 2
+            _make_txn_payload(pid_bread, 2, 35, "CASH"),
         ]
-        expected_revenue = (5*60) + (3*60) + (10*35) + (8*150) + (2*35)
+        expected_revenue = (5 * 60) + (3 * 60) + (10 * 35) + (8 * 150) + (2 * 35)
 
         for payload in sale_payloads:
             resp = client.post("/api/v1/transactions", headers=headers, json=payload)
@@ -249,14 +293,14 @@ def test_full_retail_day(client, app, test_store, test_owner, owner_headers, tes
         resp = client.get("/api/v1/inventory/alerts", headers=headers)
         assert resp.status_code == 200
         alerts = resp.json["data"]
-        cheese_alerts = [a for a in alerts
-                         if a["alert_type"] == "LOW_STOCK" and a["product_id"] == pid_cheese]
+        cheese_alerts = [a for a in alerts if a["alert_type"] == "LOW_STOCK" and a["product_id"] == pid_cheese]
         assert len(cheese_alerts) >= 1, "Cheese (stock=2, reorder=15) should trigger LOW_STOCK"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  2) test_supplier_po_stock_cycle
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_headers, test_category):
     """
@@ -269,14 +313,22 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
     """
     with app.app_context():
         from uuid import UUID as _UUID
+
         headers = owner_headers
         sid = test_store.store_id
 
         # Create product with stock = 20
-        resp = client.post("/api/v1/inventory/products", headers=headers, json={
-            "name": "Widget", "cost_price": 50, "selling_price": 80,
-            "current_stock": 20, "category_id": test_category.category_id,
-        })
+        resp = client.post(
+            "/api/v1/inventory/products",
+            headers=headers,
+            json={
+                "name": "Widget",
+                "cost_price": 50,
+                "selling_price": 80,
+                "current_stock": 20,
+                "category_id": test_category.category_id,
+            },
+        )
         assert resp.status_code == 201
         product_id = resp.json["data"]["product_id"]
 
@@ -287,16 +339,21 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
 
         # Link product to supplier
         resp = client.post(
-            f"/api/v1/suppliers/{supplier_id}/products", headers=headers,
+            f"/api/v1/suppliers/{supplier_id}/products",
+            headers=headers,
             json={"product_id": product_id, "quoted_price": 48, "lead_time_days": 5},
         )
         assert resp.status_code == 201
 
         # Create PO (DRAFT)
-        resp = client.post("/api/v1/purchase-orders", headers=headers, json={
-            "supplier_id": supplier_id,
-            "items": [{"product_id": product_id, "ordered_qty": 30, "unit_price": 48}],
-        })
+        resp = client.post(
+            "/api/v1/purchase-orders",
+            headers=headers,
+            json={
+                "supplier_id": supplier_id,
+                "items": [{"product_id": product_id, "ordered_qty": 30, "unit_price": 48}],
+            },
+        )
         assert resp.status_code == 201
         po_id = resp.json["data"]["id"]
 
@@ -315,7 +372,8 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
         product.current_stock = float(product.current_stock or 0) + 30
 
         grn = GoodsReceiptNote(
-            po_id=po.id, store_id=sid,
+            po_id=po.id,
+            store_id=sid,
             received_by=test_owner.user_id,
             notes="Full delivery",
         )
@@ -342,6 +400,7 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
 #  3) test_loyalty_full_cycle
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, test_category):
     """
     Set up loyalty (1 pt/₹, 0.1 redemption rate) → create customer →
@@ -352,30 +411,50 @@ def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, 
         headers = owner_headers
 
         # Set up loyalty program
-        resp = client.put("/api/v1/loyalty/program", headers=headers, json={
-            "points_per_rupee": 1.0, "redemption_rate": 0.1,
-            "min_redemption_points": 50, "expiry_days": 365, "is_active": True,
-        })
+        resp = client.put(
+            "/api/v1/loyalty/program",
+            headers=headers,
+            json={
+                "points_per_rupee": 1.0,
+                "redemption_rate": 0.1,
+                "min_redemption_points": 50,
+                "expiry_days": 365,
+                "is_active": True,
+            },
+        )
         assert resp.status_code == 200
 
         # Create a customer
-        resp = client.post("/api/v1/customers", headers=headers, json={
-            "name": "Raj Kumar", "mobile_number": "9876543210",
-        })
+        resp = client.post(
+            "/api/v1/customers",
+            headers=headers,
+            json={
+                "name": "Raj Kumar",
+                "mobile_number": "9876543210",
+            },
+        )
         assert resp.status_code == 201
         customer_id = resp.json["data"]["customer_id"]
 
         # Create a product
-        resp = client.post("/api/v1/inventory/products", headers=headers, json={
-            "name": "Premium Tea", "cost_price": 80, "selling_price": 200,
-            "current_stock": 100, "category_id": test_category.category_id,
-        })
+        resp = client.post(
+            "/api/v1/inventory/products",
+            headers=headers,
+            json={
+                "name": "Premium Tea",
+                "cost_price": 80,
+                "selling_price": 200,
+                "current_stock": 100,
+                "category_id": test_category.category_id,
+            },
+        )
         assert resp.status_code == 201
         product_id = resp.json["data"]["product_id"]
 
         # Record sale of ₹200 with customer_id → should earn 200 points
-        resp = client.post("/api/v1/transactions", headers=headers,
-                           json=_make_txn_payload(product_id, 1, 200, "CASH", customer_id))
+        resp = client.post(
+            "/api/v1/transactions", headers=headers, json=_make_txn_payload(product_id, 1, 200, "CASH", customer_id)
+        )
         assert resp.status_code == 201
 
         # Verify loyalty account has 200 points
@@ -384,8 +463,9 @@ def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, 
         assert float(resp.json["data"]["redeemable_points"]) == pytest.approx(200.0)
 
         # Redeem 100 points
-        resp = client.post(f"/api/v1/loyalty/customers/{customer_id}/redeem",
-                           headers=headers, json={"points_to_redeem": 100})
+        resp = client.post(
+            f"/api/v1/loyalty/customers/{customer_id}/redeem", headers=headers, json={"points_to_redeem": 100}
+        )
         assert resp.status_code == 200
 
         # Verify balance is 100
@@ -394,14 +474,16 @@ def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, 
         assert float(resp.json["data"]["redeemable_points"]) == pytest.approx(100.0)
 
         # Attempt to redeem 200 points (only 100 available) → 422
-        resp = client.post(f"/api/v1/loyalty/customers/{customer_id}/redeem",
-                           headers=headers, json={"points_to_redeem": 200})
+        resp = client.post(
+            f"/api/v1/loyalty/customers/{customer_id}/redeem", headers=headers, json={"points_to_redeem": 200}
+        )
         assert resp.status_code == 422
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  4) test_gst_month_compilation
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def test_gst_month_compilation(client, app, test_store, test_owner, owner_headers, test_category):
     """
@@ -411,12 +493,15 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
     with app.app_context():
         headers = owner_headers
         sid = test_store.store_id
-        period = date.today().strftime("%Y-%m")
+        period = datetime.now(timezone.utc).date().strftime("%Y-%m")
 
         # Enable GST via direct ORM (avoids GSTIN checksum complexity)
         config = StoreGSTConfig(
-            store_id=sid, gstin="29AABCU9603R1ZP",
-            registration_type="REGULAR", state_code="29", is_gst_enabled=True,
+            store_id=sid,
+            gstin="29AABCU9603R1ZP",
+            registration_type="REGULAR",
+            state_code="29",
+            is_gst_enabled=True,
         )
         _db.session.add(config)
 
@@ -432,13 +517,20 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
         # Create 2 products with different HSN codes (and 1 without for variety)
         product_ids = {}
         for name, hsn, cost, sell in [
-            ("Basmati Rice",  "1006", 60,  80),
-            ("Face Cream",    "3304", 100, 200),
+            ("Basmati Rice", "1006", 60, 80),
+            ("Face Cream", "3304", 100, 200),
         ]:
-            resp = client.post("/api/v1/inventory/products", headers=headers, json={
-                "name": name, "cost_price": cost, "selling_price": sell,
-                "current_stock": 200, "category_id": test_category.category_id,
-            })
+            resp = client.post(
+                "/api/v1/inventory/products",
+                headers=headers,
+                json={
+                    "name": name,
+                    "cost_price": cost,
+                    "selling_price": sell,
+                    "current_stock": 200,
+                    "category_id": test_category.category_id,
+                },
+            )
             assert resp.status_code == 201
             pid = resp.json["data"]["product_id"]
             p = _db.session.query(Product).filter_by(product_id=pid).first()
@@ -451,25 +543,21 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
 
         # Record 10 transactions: 6 rice (5% GST), 4 cream (18% GST)
         for _ in range(6):
-            resp = client.post("/api/v1/transactions", headers=headers,
-                               json=_make_txn_payload(pid_rice, 2, 80, "UPI"))
+            resp = client.post("/api/v1/transactions", headers=headers, json=_make_txn_payload(pid_rice, 2, 80, "UPI"))
             assert resp.status_code == 201
 
         for _ in range(4):
-            resp = client.post("/api/v1/transactions", headers=headers,
-                               json=_make_txn_payload(pid_cream, 1, 200, "CASH"))
+            resp = client.post(
+                "/api/v1/transactions", headers=headers, json=_make_txn_payload(pid_cream, 1, 200, "CASH")
+            )
             assert resp.status_code == 201
 
         # Verify GST transactions were recorded (automated by transaction service)
-        gst_txn_count = _db.session.query(GSTTransaction).filter_by(
-            store_id=sid, period=period
-        ).count()
+        gst_txn_count = _db.session.query(GSTTransaction).filter_by(store_id=sid, period=period).count()
         assert gst_txn_count == 10, f"Expected 10 GST txns, got {gst_txn_count}"
 
         # Compile GST filing in-process (simulate task via ORM)
-        gst_txns = _db.session.query(GSTTransaction).filter_by(
-            store_id=sid, period=period
-        ).all()
+        gst_txns = _db.session.query(GSTTransaction).filter_by(store_id=sid, period=period).all()
 
         total_taxable = sum(Decimal(str(gt.taxable_amount or 0)) for gt in gst_txns)
         total_cgst = sum(Decimal(str(gt.cgst_amount or 0)) for gt in gst_txns)
@@ -477,7 +565,8 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
         total_igst = sum(Decimal(str(gt.igst_amount or 0)) for gt in gst_txns)
 
         filing = GSTFilingPeriod(
-            store_id=sid, period=period,
+            store_id=sid,
+            period=period,
             total_taxable=round(total_taxable, 2),
             total_cgst=round(total_cgst, 2),
             total_sgst=round(total_sgst, 2),
@@ -508,14 +597,13 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
         slabs = resp.json["data"]
         assert len(slabs) >= 2  # 5% and 18% slabs
         slab_total = sum(s["tax_amount"] for s in slabs)
-        assert slab_total == pytest.approx(
-            float(summary["total_cgst"]) + float(summary["total_sgst"]), rel=0.01
-        )
+        assert slab_total == pytest.approx(float(summary["total_cgst"]) + float(summary["total_sgst"]), rel=0.01)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  5) test_offline_snapshot_freshness
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def test_offline_snapshot_freshness(client, app, test_store, test_owner, owner_headers):
     """
@@ -525,20 +613,27 @@ def test_offline_snapshot_freshness(client, app, test_store, test_owner, owner_h
     with app.app_context():
         headers = owner_headers
         sid = test_store.store_id
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
 
         # Seed 30 days of DailyStoreSummary
         for i in range(30):
             d = today - timedelta(days=i)
-            _db.session.add(DailyStoreSummary(
-                store_id=sid, date=d,
-                revenue=1000 + i * 10, profit=300 + i * 3,
-                transaction_count=20 + i, avg_basket=50.0, units_sold=100 + i,
-            ))
+            _db.session.add(
+                DailyStoreSummary(
+                    store_id=sid,
+                    date=d,
+                    revenue=1000 + i * 10,
+                    profit=300 + i * 3,
+                    transaction_count=20 + i,
+                    avg_basket=50.0,
+                    units_sold=100 + i,
+                )
+            )
         _db.session.commit()
 
         # Build snapshot in-process (uses Flask db.session via builder)
         from app.offline.builder import build_snapshot
+
         snapshot_data = build_snapshot(sid, _db)
         serialized_len = len(json.dumps(snapshot_data).encode("utf-8"))
 
@@ -571,6 +666,7 @@ def test_offline_snapshot_freshness(client, app, test_store, test_owner, owner_h
 #  6) test_chain_cross_store_isolation
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def test_chain_cross_store_isolation(client, app):
     """
     Create 2 stores: A and B.  Login as owner of A.  Create supplier in A.
@@ -586,9 +682,12 @@ def test_chain_cross_store_isolation(client, app):
         _db.session.add(store_a)
         _db.session.commit()
         owner_a = User(
-            mobile_number="7000000001", password_hash=pw_hash,
-            full_name="Owner Alpha", role="owner",
-            store_id=store_a.store_id, is_active=True,
+            mobile_number="7000000001",
+            password_hash=pw_hash,
+            full_name="Owner Alpha",
+            role="owner",
+            store_id=store_a.store_id,
+            is_active=True,
         )
         _db.session.add(owner_a)
         _db.session.commit()
@@ -599,9 +698,12 @@ def test_chain_cross_store_isolation(client, app):
         _db.session.add(store_b)
         _db.session.commit()
         owner_b = User(
-            mobile_number="7000000002", password_hash=pw_hash,
-            full_name="Owner Beta", role="owner",
-            store_id=store_b.store_id, is_active=True,
+            mobile_number="7000000002",
+            password_hash=pw_hash,
+            full_name="Owner Beta",
+            role="owner",
+            store_id=store_b.store_id,
+            is_active=True,
         )
         _db.session.add(owner_b)
         _db.session.commit()

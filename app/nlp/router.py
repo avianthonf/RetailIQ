@@ -10,8 +10,10 @@ INTENT_PATTERNS = [
     ("profit", r"(?i)(profit|margin|cost)"),
     ("top_products", r"(?i)(top|best|pareto|80/20)"),
     ("loyalty_summary", r"(?i)(loyalty|points|redeem|rewards|earn)"),
-    ("credit_overdue", r"(?i)(credit|overdue|repayment|debt|ledger)")
+    ("credit_overdue", r"(?i)(credit|overdue|repayment|debt|ledger)"),
+    ("market_intelligence", r"(?i)(market|competitor|commodity|weather|anomaly|sentiment)"),
 ]
+
 
 def resolve_intent(query: str) -> str:
     """Return the highest precedence intent that matches the query."""

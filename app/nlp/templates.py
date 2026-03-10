@@ -6,54 +6,60 @@ TEMPLATES = {
     "forecast": {
         "headline": "Demand Context",
         "detail_template": "Projected demand of {forecast} units over the next 7 days (Regime: {regime}).",
-        "action": "Consider setting safety stock based on {lead_time} days lead time."
+        "action": "Consider setting safety stock based on {lead_time} days lead time.",
     },
     "inventory": {
         "headline": "Stock Alert",
         "detail_template": "Current stock is {stock} units. Reorder level at {reorder}. Deficit: {deficit} units.",
-        "action": "Restock immediately."
+        "action": "Restock immediately.",
     },
     "revenue": {
         "headline": "Revenue Update",
         "detail_template": "Today's store-wide revenue is {revenue}. The 7-day average is {ma_7d}.",
-        "action_template": "Variance from average: {delta_pct}%."
+        "action_template": "Variance from average: {delta_pct}%.",
     },
     "profit": {
         "headline": "Profitability Alert",
         "detail_template": "SKU margin is running at {margin}%.",
-        "action": "Assess pricing structure against cost basis."
+        "action": "Assess pricing structure against cost basis.",
     },
     "top_products": {
         "headline": "Top Performers",
         "detail_template": "Leading SKUs by revenue (last 30 days): {value}.",
-        "action": "Consider increasing stock levels for top revenue contributors."
+        "action": "Consider increasing stock levels for top revenue contributors.",
     },
     "loyalty_summary": {
         "headline": "Loyalty Program Summary",
         "detail_template": "You have {enrolled} enrolled customers. {issued} points issued and {redeemed} points redeemed this month.",
-        "action": "Promote loyalty program at checkout."
+        "action": "Promote loyalty program at checkout.",
     },
     "credit_overdue": {
         "headline": "Overdue Credit",
         "detail_template": "There are {count} customers with overdue credit exceeding 30 days. Total outstanding: {total_overdue}.",
-        "action": "Send reminders to overdue customers."
+        "action": "Send reminders to overdue customers.",
     },
     "default": {
         "headline": "Retail Intelligence",
         "detail_template": "Analyzing historical data bounds. Current observed value: {value}.",
-        "action": "No specific anomalies detected."
+        "action": "No specific anomalies detected.",
+    },
+    "market_intelligence": {
+        "headline": "Market Intelligence Summary",
+        "detail_template": "Analyzed recent market signals. Status: {status}. Active Alerts: {active_alerts}.",
+        "action": "Review pricing strategies based on current market trends.",
     },
     "supplier_reliability": {
         "headline": "Supplier Reliability",
         "detail_template": "Your most reliable supplier is {name} with a {fill_rate}% fill rate and {lead_time} day average lead time.",
-        "action": "Maintain relationship."
+        "action": "Maintain relationship.",
     },
     "overdue_po": {
         "headline": "Overdue Orders",
         "detail_template": "You have {n} overdue purchase orders. Oldest is {days} days late from {supplier_name}.",
-        "action": "Follow up with suppliers."
-    }
+        "action": "Follow up with suppliers.",
+    },
 }
+
 
 def format_percentage(val: float) -> str:
     """Format % to 1 decimal. Suppress <2%."""
@@ -62,14 +68,15 @@ def format_percentage(val: float) -> str:
         return "Stable (<2% change)"
     return f"{rounded}%"
 
+
 def format_currency(val: float) -> str:
     """Format INR currency with thousands separator."""
     s = f"{val:,.2f}"
-    parts = s.split('.')
+    parts = s.split(".")
     integer_part = parts[0]
     decimal_part = parts[1]
 
-    integer_part = integer_part.replace(',', '')
+    integer_part = integer_part.replace(",", "")
     if len(integer_part) > 3:
         last_three = integer_part[-3:]
         remaining = integer_part[:-3]
@@ -81,6 +88,7 @@ def format_currency(val: float) -> str:
             formatted = remaining + formatted
         integer_part = formatted + "," + last_three
     return f"₹{integer_part}.{decimal_part}"
+
 
 def format_unit(val: float, item_name: str = "unit") -> str:
     val_int = math.ceil(abs(val))

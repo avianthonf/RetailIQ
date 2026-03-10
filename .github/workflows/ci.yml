@@ -62,7 +62,6 @@ jobs:
 
       - name: Ruff format check
         run: ruff format --check .
-        continue-on-error: true   # advisory, don't block PRs yet
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. SECURITY — SAST + dependency audit
@@ -92,8 +91,8 @@ jobs:
           bandit -r app/ -s B101,B601 -ll || true
 
       - name: pip-audit (known CVEs)
-        run: pip-audit -r requirements.txt --desc || true
-        continue-on-error: true   # advisory — don't block if a dep has no fix yet
+        run: pip-audit -r requirements.txt --desc
+        continue-on-error: false # Block if vulnerabilities found
 
       - name: Upload Bandit report
         if: always()
@@ -112,7 +111,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: ['3.10', '3.11', '3.12']
 
     services:
       postgres:
@@ -189,8 +188,8 @@ jobs:
           rate = float(tree.getroot().attrib['line-rate'])
           pct = round(rate * 100, 1)
           print(f'Coverage: {pct}%')
-          if pct < 40:
-              raise SystemExit(f'Coverage {pct}% is below 40% minimum')
+          if pct < 60:
+              raise SystemExit(f'Coverage {pct}% is below 60% minimum')
           "
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -282,15 +281,10 @@ jobs:
           echo "docker:          ${{ needs.docker.result }}"
           echo "migration-check: ${{ needs.migration-check.result }}"
 
-          # Fail if any required job failed
+          # Fail if any required job failed (excluding security which is advisory)
           if [[ "${{ needs.lint.result }}" == "failure" ]]; then exit 1; fi
           if [[ "${{ needs.test.result }}" == "failure" ]]; then exit 1; fi
           if [[ "${{ needs.docker.result }}" == "failure" ]]; then exit 1; fi
           if [[ "${{ needs.migration-check.result }}" == "failure" ]]; then exit 1; fi
-
-          # Security is advisory — warn but don't fail
-          if [[ "${{ needs.security.result }}" == "failure" ]]; then
-            echo "::warning::Security scan had failures (advisory)"
-          fi
 
           echo "🎉 All required CI checks passed."

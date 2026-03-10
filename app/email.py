@@ -6,6 +6,7 @@ Sends transactional emails (OTPs, password resets) via Gmail SMTP.
 Falls back to console logging when MAIL_USERNAME / MAIL_PASSWORD are not
 configured (local development).
 """
+
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart

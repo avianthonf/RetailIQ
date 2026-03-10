@@ -1,6 +1,7 @@
 """
 Tests for GST: Schema, HSN Master, and GSTR-1 Generation (Prompt 7.B)
 """
+
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,19 +25,21 @@ from app.transactions.services import process_single_transaction
 
 # ── Fixtures ────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_celery_task_session(monkeypatch):
     @contextmanager
     def mock_session(*args, **kwargs):
         yield db.session
         db.session.commit()
-    monkeypatch.setattr('app.tasks.tasks.task_session', mock_session)
+
+    monkeypatch.setattr("app.tasks.tasks.task_session", mock_session)
 
 
 @pytest.fixture
 def hsn_entry(app):
     """Seed a single HSN code for testing."""
-    entry = HSNMaster(hsn_code='8517', description='Telephones, smartphones', default_gst_rate=18)
+    entry = HSNMaster(hsn_code="8517", description="Telephones, smartphones", default_gst_rate=18)
     db.session.add(entry)
     db.session.commit()
     return entry
@@ -44,7 +47,7 @@ def hsn_entry(app):
 
 @pytest.fixture
 def hsn_biscuit(app):
-    entry = HSNMaster(hsn_code='1905', description='Biscuits, cakes, pastry', default_gst_rate=12)
+    entry = HSNMaster(hsn_code="1905", description="Biscuits, cakes, pastry", default_gst_rate=12)
     db.session.add(entry)
     db.session.commit()
     return entry
@@ -55,10 +58,10 @@ def gst_enabled_store(app, test_store):
     """Enable GST for the test store."""
     config = StoreGSTConfig(
         store_id=test_store.store_id,
-        gstin='27AAPFU0939F1ZV',
-        registration_type='REGULAR',
-        state_code='27',
-        is_gst_enabled=True
+        gstin="27AAPFU0939F1ZV",
+        registration_type="REGULAR",
+        state_code="27",
+        is_gst_enabled=True,
     )
     db.session.add(config)
     db.session.commit()
@@ -71,12 +74,12 @@ def gst_product(app, test_store, test_category, hsn_entry):
     product = Product(
         store_id=test_store.store_id,
         category_id=test_category.category_id,
-        name='Smartphone X',
+        name="Smartphone X",
         selling_price=11800.0,
         cost_price=8000.0,
         current_stock=100.0,
-        hsn_code='8517',
-        gst_category='REGULAR'
+        hsn_code="8517",
+        gst_category="REGULAR",
     )
     db.session.add(product)
     db.session.commit()
@@ -85,32 +88,33 @@ def gst_product(app, test_store, test_category, hsn_entry):
 
 # ── a. test_gstin_validator_valid ────────────────────────────────────
 
+
 def test_gstin_validator_valid(app):
     # Known-good test GSTIN with correct checksum
-    assert validate_gstin('27AAPFU0939F1ZV') is True
+    assert validate_gstin("27AAPFU0939F1ZV") is True
 
 
 # ── b. test_gstin_validator_invalid_checksum ──────────────────────────
 
+
 def test_gstin_validator_invalid_checksum(app):
     # Correct format but wrong checksum character (V -> X)
-    assert validate_gstin('27AAPFU0939F1ZX') is False
+    assert validate_gstin("27AAPFU0939F1ZX") is False
     # Too short
-    assert validate_gstin('27AAPFU0939F1Z') is False
+    assert validate_gstin("27AAPFU0939F1Z") is False
     # Invalid state code
-    assert validate_gstin('99AAPFU0939F1ZV') is False
+    assert validate_gstin("99AAPFU0939F1ZV") is False
 
 
 # ── c. test_gst_transaction_created_on_sale ──────────────────────────
 
+
 def test_gst_transaction_created_on_sale(app, test_store, gst_enabled_store, gst_product):
     txn_data = {
-        'transaction_id': uuid.uuid4(),
-        'timestamp': datetime.now(timezone.utc),
-        'payment_mode': 'CASH',
-        'line_items': [
-            {'product_id': gst_product.product_id, 'quantity': 1, 'selling_price': 11800.0}
-        ]
+        "transaction_id": uuid.uuid4(),
+        "timestamp": datetime.now(timezone.utc),
+        "payment_mode": "CASH",
+        "line_items": [{"product_id": gst_product.product_id, "quantity": 1, "selling_price": 11800.0}],
     }
 
     txn = process_single_transaction(txn_data, test_store.store_id)
@@ -119,21 +123,20 @@ def test_gst_transaction_created_on_sale(app, test_store, gst_enabled_store, gst
     gst_row = db.session.query(GSTTransaction).filter_by(transaction_id=txn.transaction_id).first()
     assert gst_row is not None
     assert gst_row.store_id == test_store.store_id
-    assert gst_row.period == datetime.now(timezone.utc).strftime('%Y-%m')
+    assert gst_row.period == datetime.now(timezone.utc).strftime("%Y-%m")
     assert gst_row.hsn_breakdown is not None
-    assert '8517' in gst_row.hsn_breakdown
+    assert "8517" in gst_row.hsn_breakdown
 
 
 # ── d. test_intrastate_split ──────────────────────────────────────────
 
+
 def test_intrastate_split(app, test_store, gst_enabled_store, gst_product):
     txn_data = {
-        'transaction_id': uuid.uuid4(),
-        'timestamp': datetime.now(timezone.utc),
-        'payment_mode': 'CASH',
-        'line_items': [
-            {'product_id': gst_product.product_id, 'quantity': 1, 'selling_price': 11800.0}
-        ]
+        "transaction_id": uuid.uuid4(),
+        "timestamp": datetime.now(timezone.utc),
+        "payment_mode": "CASH",
+        "line_items": [{"product_id": gst_product.product_id, "quantity": 1, "selling_price": 11800.0}],
     }
 
     txn = process_single_transaction(txn_data, test_store.store_id)
@@ -157,81 +160,84 @@ def test_intrastate_split(app, test_store, gst_enabled_store, gst_product):
 
 # ── e. test_hsn_search_returns_matches ────────────────────────────────
 
+
 def test_hsn_search_returns_matches(app, client, owner_headers, hsn_entry, hsn_biscuit):
     # Search by code prefix
-    resp = client.get('/api/v1/gst/hsn-search?q=85', headers=owner_headers)
+    resp = client.get("/api/v1/gst/hsn-search?q=85", headers=owner_headers)
     assert resp.status_code == 200
-    data = resp.json['data']
+    data = resp.json["data"]
     assert len(data) >= 1
-    assert any(d['hsn_code'] == '8517' for d in data)
+    assert any(d["hsn_code"] == "8517" for d in data)
 
     # Search by description (ILIKE)
-    resp = client.get('/api/v1/gst/hsn-search?q=biscuit', headers=owner_headers)
+    resp = client.get("/api/v1/gst/hsn-search?q=biscuit", headers=owner_headers)
     assert resp.status_code == 200
-    data = resp.json['data']
+    data = resp.json["data"]
     assert len(data) >= 1
-    assert any(d['hsn_code'] == '1905' for d in data)
+    assert any(d["hsn_code"] == "1905" for d in data)
 
 
 # ── f. test_gst_liability_slab_breakdown ──────────────────────────────
 
-def test_gst_liability_slab_breakdown(app, client, owner_headers, test_store, gst_enabled_store, gst_product, hsn_biscuit):
+
+def test_gst_liability_slab_breakdown(
+    app, client, owner_headers, test_store, gst_enabled_store, gst_product, hsn_biscuit
+):
     # Create a second product at 12% rate
     biscuit = Product(
         store_id=test_store.store_id,
-        name='Biscuit Pack',
+        name="Biscuit Pack",
         selling_price=112.0,
         cost_price=70.0,
         current_stock=100.0,
-        hsn_code='1905',
-        gst_category='REGULAR'
+        hsn_code="1905",
+        gst_category="REGULAR",
     )
     db.session.add(biscuit)
     db.session.commit()
 
-    period = datetime.now(timezone.utc).strftime('%Y-%m')
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
 
     # Transaction with smartphone (18%) and biscuit (12%)
     txn_data = {
-        'transaction_id': uuid.uuid4(),
-        'timestamp': datetime.now(timezone.utc),
-        'payment_mode': 'CASH',
-        'line_items': [
-            {'product_id': gst_product.product_id, 'quantity': 1, 'selling_price': 11800.0},
-            {'product_id': biscuit.product_id, 'quantity': 1, 'selling_price': 112.0},
-        ]
+        "transaction_id": uuid.uuid4(),
+        "timestamp": datetime.now(timezone.utc),
+        "payment_mode": "CASH",
+        "line_items": [
+            {"product_id": gst_product.product_id, "quantity": 1, "selling_price": 11800.0},
+            {"product_id": biscuit.product_id, "quantity": 1, "selling_price": 112.0},
+        ],
     }
     process_single_transaction(txn_data, test_store.store_id)
     db.session.commit()
 
-    resp = client.get(f'/api/v1/gst/liability-slabs?period={period}', headers=owner_headers)
+    resp = client.get(f"/api/v1/gst/liability-slabs?period={period}", headers=owner_headers)
     assert resp.status_code == 200
-    slabs = resp.json['data']
+    slabs = resp.json["data"]
     assert len(slabs) >= 2
 
-    rates = [s['rate'] for s in slabs]
+    rates = [s["rate"] for s in slabs]
     assert 12.0 in rates
     assert 18.0 in rates
 
 
 # ── g. test_monthly_compilation_task ──────────────────────────────────
 
+
 def test_monthly_compilation_task(app, test_store, gst_enabled_store, gst_product, mock_celery_task_session):
     import json
 
     from app.tasks.tasks import compile_monthly_gst
 
-    period = datetime.now(timezone.utc).strftime('%Y-%m')
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
 
     # Seed 5 transactions
     for _i in range(5):
         txn_data = {
-            'transaction_id': uuid.uuid4(),
-            'timestamp': datetime.now(timezone.utc),
-            'payment_mode': 'CASH',
-            'line_items': [
-                {'product_id': gst_product.product_id, 'quantity': 1, 'selling_price': 11800.0}
-            ]
+            "transaction_id": uuid.uuid4(),
+            "timestamp": datetime.now(timezone.utc),
+            "payment_mode": "CASH",
+            "line_items": [{"product_id": gst_product.product_id, "quantity": 1, "selling_price": 11800.0}],
         }
         process_single_transaction(txn_data, test_store.store_id)
     db.session.commit()
@@ -244,7 +250,7 @@ def test_monthly_compilation_task(app, test_store, gst_enabled_store, gst_produc
     filing = db.session.query(GSTFilingPeriod).filter_by(store_id=test_store.store_id, period=period).first()
     assert filing is not None
     assert filing.invoice_count == 5
-    assert filing.status == 'COMPILED'
+    assert filing.status == "COMPILED"
     assert filing.compiled_at is not None
 
     # Verify totals: 5 x 11800 total, each has taxable=10000, cgst=900, sgst=900
@@ -255,24 +261,24 @@ def test_monthly_compilation_task(app, test_store, gst_enabled_store, gst_produc
     # Verify GSTR-1 JSON was written
     assert filing.gstr1_json_path is not None
     import os
+
     assert os.path.exists(filing.gstr1_json_path)
     with open(filing.gstr1_json_path) as f:
         gstr1 = json.load(f)
-    assert gstr1['gstin'] == '27AAPFU0939F1ZV'
-    assert len(gstr1['hsn']['data']) >= 1
+    assert gstr1["gstin"] == "27AAPFU0939F1ZV"
+    assert len(gstr1["hsn"]["data"]) >= 1
 
 
 # ── h. test_gst_disabled_store_no_gst_row ─────────────────────────────
 
+
 def test_gst_disabled_store_no_gst_row(app, test_store, test_product):
     """Record transaction on a non-GST store, assert no gst_transactions row."""
     txn_data = {
-        'transaction_id': uuid.uuid4(),
-        'timestamp': datetime.now(timezone.utc),
-        'payment_mode': 'CASH',
-        'line_items': [
-            {'product_id': test_product.product_id, 'quantity': 2, 'selling_price': 100.0}
-        ]
+        "transaction_id": uuid.uuid4(),
+        "timestamp": datetime.now(timezone.utc),
+        "payment_mode": "CASH",
+        "line_items": [{"product_id": test_product.product_id, "quantity": 2, "selling_price": 100.0}],
     }
 
     txn = process_single_transaction(txn_data, test_store.store_id)

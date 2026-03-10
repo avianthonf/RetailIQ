@@ -4,7 +4,7 @@ RetailIQ Forecasting Engine
 Produces daily unit-sales forecasts for a single SKU given its history.
 
 Decision tree:
-  ≥ 60 days data → Prophet
+  ≥ 60 days data → Multi-model Ensemble (Prophet + XGBoost + LSTM)
   < 60 days data → Linear regression fallback
 
 Regime detection (applied before storing):
@@ -16,6 +16,7 @@ Regime detection (applied before storing):
 All public functions are pure (no DB side-effects) and therefore testable
 without a database.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # ── Data types ────────────────────────────────────────────────────────────────
 
+
 class ForecastPoint(NamedTuple):
     forecast_date: date
     forecast_mean: float
@@ -40,12 +42,13 @@ class ForecastPoint(NamedTuple):
 
 class ForecastResult(NamedTuple):
     points: list[ForecastPoint]
-    regime: str          # Stable | Trending | Seasonal | Volatile
-    model_type: str      # prophet | linear_regression
+    regime: str  # Stable | Trending | Seasonal | Volatile
+    model_type: str  # ensemble | prophet | linear_regression
     training_window_days: int
 
 
 # ── Regime detection ──────────────────────────────────────────────────────────
+
 
 def detect_regime(series: list[float]) -> str:
     """
@@ -54,7 +57,7 @@ def detect_regime(series: list[float]) -> str:
     Priority: Volatile > Trending > Seasonal > Stable
     """
     if len(series) < 7:
-        return 'Stable'
+        return "Stable"
 
     arr = np.array(series, dtype=float)
     mean = arr.mean()
@@ -63,35 +66,38 @@ def detect_regime(series: list[float]) -> str:
     cv = arr.std() / mean if mean > 0 else 0.0
 
     if cv >= 0.5:
-        return 'Volatile'
+        return "Volatile"
 
     # Mann-Kendall trend test
     try:
         from scipy.stats import kendalltau
+
         n = len(arr)
         tau, p_value = kendalltau(np.arange(n), arr)
         if p_value < 0.05:
-            return 'Trending'
+            return "Trending"
     except Exception:
         pass
 
     # ACF at lag 7
     try:
         from statsmodels.tsa.stattools import acf
+
         if len(arr) >= 14:
             acf_vals = acf(arr, nlags=7, fft=True)
             if abs(acf_vals[7]) > 0.4:
-                return 'Seasonal'
+                return "Seasonal"
     except Exception:
         pass
 
     if cv < 0.25:
-        return 'Stable'
+        return "Stable"
 
-    return 'Stable'
+    return "Stable"
 
 
 # ── Linear regression fallback ────────────────────────────────────────────────
+
 
 def _linear_regression_forecast(
     history: pd.DataFrame,
@@ -108,42 +114,46 @@ def _linear_regression_forecast(
     from sklearn.pipeline import Pipeline, make_pipeline
     from sklearn.preprocessing import OneHotEncoder
 
-    df = history.copy().sort_values('ds')
-    df['days_since_start'] = (df['ds'] - df['ds'].min()).dt.days
-    df['lag_7']  = df['y'].shift(7)
-    df['lag_14'] = df['y'].shift(14)
-    df['dow']    = df['ds'].dt.dayofweek  # 0=Mon
+    df = history.copy().sort_values("ds")
+    df["days_since_start"] = (df["ds"] - df["ds"].min()).dt.days
+    df["lag_7"] = df["y"].shift(7)
+    df["lag_14"] = df["y"].shift(14)
+    df["dow"] = df["ds"].dt.dayofweek  # 0=Mon
 
-    df_train = df.dropna(subset=['lag_7', 'lag_14'])
+    df_train = df.dropna(subset=["lag_7", "lag_14"])
     if df_train.empty:
         # Fallback: return mean
-        mean_val = max(0.0, float(df['y'].mean()))
-        return _flat_forecast(history, horizon, mean_val, interval_width), 'flat'
+        mean_val = max(0.0, float(df["y"].mean()))
+        return _flat_forecast(history, horizon, mean_val, interval_width), "flat"
 
-    X = df_train[['dow', 'days_since_start', 'lag_7', 'lag_14']].values
-    y = df_train['y'].values
+    X = df_train[["dow", "days_since_start", "lag_7", "lag_14"]].values
+    y = df_train["y"].values
 
-    ct = ColumnTransformer([
-        ('dow_enc', OneHotEncoder(sparse_output=False, categories=[list(range(7))]), [0]),
-    ], remainder='passthrough')
-    model = Pipeline([('ct', ct), ('ridge', Ridge(alpha=1.0))])
+    ct = ColumnTransformer(
+        [
+            ("dow_enc", OneHotEncoder(sparse_output=False, categories=[list(range(7))]), [0]),
+        ],
+        remainder="passthrough",
+    )
+    model = Pipeline([("ct", ct), ("ridge", Ridge(alpha=1.0))])
     model.fit(X, y)
 
     residuals = y - model.predict(X)
     sigma = float(np.std(residuals))
     from scipy.stats import norm
+
     z = norm.ppf(0.5 + interval_width / 2)
 
     # Build inference
-    last_date = df['ds'].max().date()
-    last_y    = list(df['y'].values)
-    last_days = int(df['days_since_start'].max())
+    last_date = df["ds"].max().date()
+    last_y = list(df["y"].values)
+    last_days = int(df["days_since_start"].max())
     points = []
     for i in range(1, horizon + 1):
         fc_date = last_date + timedelta(days=i)
         dow_val = fc_date.weekday()
         days_val = last_days + i
-        lag7_val  = last_y[-7]  if len(last_y) >= 7  else (last_y[0] if last_y else 0)
+        lag7_val = last_y[-7] if len(last_y) >= 7 else (last_y[0] if last_y else 0)
         lag14_val = last_y[-14] if len(last_y) >= 14 else (last_y[0] if last_y else 0)
 
         x_row = np.array([[dow_val, days_val, lag7_val, lag14_val]])
@@ -151,21 +161,24 @@ def _linear_regression_forecast(
         pred = max(0.0, pred)
         last_y.append(pred)
 
-        points.append(ForecastPoint(
-            forecast_date=fc_date,
-            forecast_mean=round(pred, 3),
-            lower_bound=round(max(0.0, pred - z * sigma), 3),
-            upper_bound=round(pred + z * sigma, 3),
-            base_forecast=round(pred, 3),
-        ))
-    return points, 'ridge'
+        points.append(
+            ForecastPoint(
+                forecast_date=fc_date,
+                forecast_mean=round(pred, 3),
+                lower_bound=round(max(0.0, pred - z * sigma), 3),
+                upper_bound=round(pred + z * sigma, 3),
+                base_forecast=round(pred, 3),
+            )
+        )
+    return points, "ridge"
 
 
 def _flat_forecast(history: pd.DataFrame, horizon: int, value: float, interval_width: float) -> list[ForecastPoint]:
     from scipy.stats import norm
-    std = float(history['y'].std()) if len(history) > 1 else value * 0.2
-    z   = norm.ppf(0.5 + interval_width / 2)
-    last_date = history['ds'].max().date()
+
+    std = float(history["y"].std()) if len(history) > 1 else value * 0.2
+    z = norm.ppf(0.5 + interval_width / 2)
+    last_date = history["ds"].max().date()
     return [
         ForecastPoint(
             forecast_date=last_date + timedelta(days=i),
@@ -179,6 +192,7 @@ def _flat_forecast(history: pd.DataFrame, horizon: int, value: float, interval_w
 
 
 # ── Prophet forecast ──────────────────────────────────────────────────────────
+
 
 def _prophet_forecast(
     history: pd.DataFrame,
@@ -205,56 +219,94 @@ def _prophet_forecast(
     if events:
         filtered_events = []
         for e in events:
-            impact = abs(float(e['expected_impact_pct'])) if e.get('expected_impact_pct') is not None else 0.0
+            impact = abs(float(e["expected_impact_pct"])) if e.get("expected_impact_pct") is not None else 0.0
             filtered_events.append((impact, e))
         # Top 5 events by impact magnitude
         filtered_events.sort(key=lambda x: x[0], reverse=True)
         top_events = [e[1] for e in filtered_events[:5]]
 
         for e in top_events:
-            event_id_short = str(e['id'])[:8]
-            col_name = f"event_{event_id_short}"
+            event_id_unique = str(e["id"])[:8]
+            # Ensure unique internal column name even if prefixes collide
+            idx = 1
+            col_name = f"event_{event_id_unique}"
+            while col_name in [r[0] for r in active_regressors]:
+                col_name = f"event_{event_id_unique}_{idx}"
+                idx += 1
+
             active_regressors.append((col_name, e))
 
             # Add binary column to history
-            history[col_name] = history['ds'].apply(
-                lambda d: 1.0 if e['start_date'] <= d.date() <= e['end_date'] else 0.0
+            history[col_name] = history["ds"].apply(
+                lambda d: 1.0 if e["start_date"] <= d.date() <= e["end_date"] else 0.0
             )
 
-            impact_pct = e.get('expected_impact_pct')
+            impact_pct = e.get("expected_impact_pct")
             prior_scale = 10.0 if impact_pct is None else None
             m.add_regressor(col_name, prior_scale=prior_scale)
 
-    m.fit(history[['ds', 'y'] + [r[0] for r in active_regressors]])
+    m.fit(history[["ds", "y"] + [r[0] for r in active_regressors]])
     future = m.make_future_dataframe(periods=horizon)
 
     # Populate regressor columns in future dataframe
     for col_name, e in active_regressors:
-        future[col_name] = future['ds'].apply(
-            lambda d: 1.0 if e['start_date'] <= d.date() <= e['end_date'] else 0.0
-        )
+        future[col_name] = future["ds"].apply(lambda d: 1.0 if e["start_date"] <= d.date() <= e["end_date"] else 0.0)
 
     forecast = m.predict(future)
     tail = forecast.tail(horizon)
 
     points = []
     for _, row in tail.iterrows():
-        fc_date = row['ds'].date()
-        mean    = max(0.0, float(row['yhat']))
-        lb      = max(0.0, float(row['yhat_lower']))
-        ub      = max(0.0, float(row['yhat_upper']))
+        fc_date = row["ds"].date()
+        mean = max(0.0, float(row["yhat"]))
+        lb = max(0.0, float(row["yhat_lower"]))
+        ub = max(0.0, float(row["yhat_upper"]))
 
         # Determine base forecast
-        extra_regressors = float(row.get('extra_regressors_additive', 0.0))
+        extra_regressors = float(row.get("extra_regressors_additive", 0.0))
         base_forecast = max(0.0, mean - extra_regressors)
 
-        points.append(ForecastPoint(
-            forecast_date=fc_date,
-            forecast_mean=round(mean, 3),
-            lower_bound=round(lb, 3),
-            upper_bound=round(ub, 3),
-            base_forecast=round(base_forecast, 3),
-        ))
+        points.append(
+            ForecastPoint(
+                forecast_date=fc_date,
+                forecast_mean=round(mean, 3),
+                lower_bound=round(lb, 3),
+                upper_bound=round(ub, 3),
+                base_forecast=round(base_forecast, 3),
+            )
+        )
+    return points
+
+
+# ── Ensemble forecast ─────────────────────────────────────────────────────────
+
+
+def _ensemble_forecast(
+    history: pd.DataFrame,
+    horizon: int,
+    interval_width: float = 0.80,
+) -> list[ForecastPoint]:
+    """
+    Runs the Multi-model Ensemble (Prophet + XGBoost + LSTM).
+    """
+    from .ensemble import run_ensemble_forecast
+
+    dates = history["ds"].dt.date.tolist()
+    values = history["y"].tolist()
+
+    forecast_df = run_ensemble_forecast(dates, values, horizon=horizon)
+
+    points = []
+    for _, row in forecast_df.iterrows():
+        points.append(
+            ForecastPoint(
+                forecast_date=row["ds"].date(),
+                forecast_mean=round(float(row["yhat"]), 3),
+                lower_bound=round(float(row["yhat_lower"]), 3),
+                upper_bound=round(float(row["yhat_upper"]), 3),
+                base_forecast=round(float(row["yhat"]), 3),
+            )
+        )
     return points
 
 
@@ -285,32 +337,62 @@ def run_forecast(
         raise ValueError("dates and values must be the same length")
 
     regime = detect_regime(values)
-    n      = len(dates)
+    n = len(dates)
     training_window_days = n
 
-    history = pd.DataFrame({'ds': pd.to_datetime(dates), 'y': [float(v) for v in values]})
+    history = pd.DataFrame({"ds": pd.to_datetime(dates), "y": [float(v) for v in values]})
+    # Data Cleaning: ensure unique dates, sorted order, and remove time components
+    history["ds"] = history["ds"].dt.normalize()
+    history = history.sort_values("ds").drop_duplicates(subset=["ds"], keep="last")
+    history = history.reset_index(drop=True)
 
-    # Try Prophet if sufficient data
+    # Try Ensemble if sufficient data (MIN_DAYS_PROPHET used as threshold)
     if n >= MIN_DAYS_PROPHET:
-        try:
-            points = _prophet_forecast(history, horizon, interval_width, events=events)
-            return ForecastResult(
-                points=points,
-                regime=regime,
-                model_type='prophet',
-                training_window_days=training_window_days,
-            )
-        except Exception as exc:
-            logger.warning("Prophet failed (%s); falling back to linear regression", exc)
+        if events:
+            logger.info("Events present; skipping ensemble and using Prophet directly.")
+            try:
+                points = _prophet_forecast(history, horizon, interval_width, events=events)
+                return ForecastResult(
+                    points=points,
+                    regime=regime,
+                    model_type="prophet",
+                    training_window_days=training_window_days,
+                )
+            except Exception as exc2:
+                logger.warning("Prophet failed (%s); falling back to linear regression.", exc2)
+        else:
+            try:
+                points = _ensemble_forecast(history, horizon, interval_width)
+                return ForecastResult(
+                    points=points,
+                    regime=regime,
+                    model_type="ensemble",
+                    training_window_days=training_window_days,
+                )
+            except Exception as exc:
+                print(f"DEBUG: Ensemble failed: {exc}", flush=True)
+                logger.warning("Ensemble failed (%s); falling back to Prophet", exc)
+                try:
+                    points = _prophet_forecast(history, horizon, interval_width, events=events)
+                    return ForecastResult(
+                        points=points,
+                        regime=regime,
+                        model_type="prophet",
+                        training_window_days=training_window_days,
+                    )
+                except Exception as exc2:
+                    import traceback
+
+                    logger.warning("Prophet failed (%s); falling back to linear regression.", exc2)
 
     # Linear regression fallback
     try:
         points, m_type = _linear_regression_forecast(history, horizon, interval_width)
     except Exception as exc:
         logger.warning("Linear regression failed (%s); using flat mean", exc)
-        mean_val = max(0.0, float(history['y'].mean()))
+        mean_val = max(0.0, float(history["y"].mean()))
         points = _flat_forecast(history, horizon, mean_val, interval_width)
-        m_type = 'flat'
+        m_type = "flat"
 
     return ForecastResult(
         points=points,
@@ -353,22 +435,28 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
     values = [float(h.units_sold) for h in history]
 
     # 2. Fetch business events that overlap the period
-    events = session.query(BusinessEvent).filter(
-        BusinessEvent.store_id == store_id,
-        BusinessEvent.end_date >= cutoff_90,
-        BusinessEvent.start_date <= horizon_date
-    ).all()
+    events = (
+        session.query(BusinessEvent)
+        .filter(
+            BusinessEvent.store_id == store_id,
+            BusinessEvent.end_date >= cutoff_90,
+            BusinessEvent.start_date <= horizon_date,
+        )
+        .all()
+    )
 
     events_list = []
     for e in events:
-        events_list.append({
-            'id': str(e.id),
-            'event_name': e.event_name,
-            'start_date': e.start_date,
-            'end_date': e.end_date,
-            'expected_impact_pct': e.expected_impact_pct,
-            'event_type': e.event_type
-        })
+        events_list.append(
+            {
+                "id": str(e.id),
+                "event_name": e.event_name,
+                "start_date": e.start_date,
+                "end_date": e.end_date,
+                "expected_impact_pct": e.expected_impact_pct,
+                "event_type": e.event_type,
+            }
+        )
 
     # 3. Run forecast
     result = run_forecast(dates, values, horizon=horizon, interval_width=0.80, events=events_list)
@@ -377,9 +465,12 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
     # For a point, an event is active if start <= date <= end
     active_payload_list = []
     for fp in result.points:
-        day_events = [e for e in events_list if e['start_date'] <= fp.forecast_date <= e['end_date']]
+        day_events = [e for e in events_list if e["start_date"] <= fp.forecast_date <= e["end_date"]]
         # Sort by absolute expected_impact_pct descending, consistent with regressor selection
-        day_events.sort(key=lambda e: abs(float(e['expected_impact_pct'])) if e.get('expected_impact_pct') is not None else 0.0, reverse=True)
+        day_events.sort(
+            key=lambda e: abs(float(e["expected_impact_pct"])) if e.get("expected_impact_pct") is not None else 0.0,
+            reverse=True,
+        )
         active_payload = [{"id": e["id"], "event_name": e["event_name"]} for e in day_events[:5]]
 
         # 4. Save to demand_sensing_log
@@ -390,16 +481,18 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
             actual_demand=None,
             base_forecast=fp.base_forecast,
             event_adjusted_forecast=fp.forecast_mean,
-            active_events=active_payload
+            active_events=active_payload,
         )
         session.add(log_entry)
 
-        active_payload_list.append({
-            "date": fp.forecast_date.isoformat(),
-            "base_forecast": fp.base_forecast,
-            "event_adjusted_forecast": fp.forecast_mean,
-            "active_events": active_payload
-        })
+        active_payload_list.append(
+            {
+                "date": fp.forecast_date.isoformat(),
+                "base_forecast": fp.base_forecast,
+                "event_adjusted_forecast": fp.forecast_mean,
+                "active_events": active_payload,
+            }
+        )
 
     session.commit()
 
@@ -407,6 +500,5 @@ def generate_demand_forecast(store_id: int, product_id: int, session, horizon: i
         "model_type": result.model_type,
         "regime": result.regime,
         "training_window_days": result.training_window_days,
-        "forecast": active_payload_list
+        "forecast": active_payload_list,
     }
-

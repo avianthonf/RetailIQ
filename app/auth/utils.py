@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -8,44 +8,37 @@ import redis
 from flask import current_app
 
 
-def format_response(success=True, data=None, error=None, meta=None):
-    """
-    Standard Response Envelope
-    { success: bool, data: obj|null, error: {code,message}|null, meta: pagination|null, timestamp: ISO8601 }
-    """
-    return {
-        "success": success,
-        "data": data,
-        "error": error,
-        "meta": meta,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
+from app.utils.responses import standard_json as format_response
+
+
 
 def get_redis_client():
-    redis_url = current_app.config.get('CELERY_BROKER_URL', 'redis://localhost:6379/1')
+    redis_url = current_app.config.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
     return redis.Redis.from_url(redis_url, decode_responses=True)
+
 
 def generate_access_token(user_id, store_id, role):
     from app import db
     from app.models import StoreGroup
 
-    private_key = current_app.config['JWT_PRIVATE_KEY']
+    private_key = current_app.config["JWT_PRIVATE_KEY"]
     now = datetime.now(timezone.utc)
     payload = {
-        'user_id': user_id,
-        'store_id': store_id,
-        'role': role,
-        'iat': now.timestamp(),
-        'exp': (now + timedelta(days=180)).timestamp()
+        "user_id": user_id,
+        "store_id": store_id,
+        "role": role,
+        "iat": now.timestamp(),
+        "exp": (now + timedelta(minutes=60)).timestamp(),
     }
 
     # Inject Chain claims
     store_group = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
     if store_group:
-        payload['chain_group_id'] = str(store_group.id)
-        payload['chain_role'] = 'CHAIN_OWNER'
+        payload["chain_group_id"] = str(store_group.id)
+        payload["chain_role"] = "CHAIN_OWNER"
 
-    return jwt.encode(payload, private_key, algorithm='RS256')
+    return jwt.encode(payload, private_key, algorithm="RS256")
+
 
 def generate_refresh_token(user_id):
     redis_client = get_redis_client()
@@ -53,6 +46,7 @@ def generate_refresh_token(user_id):
     # 30 days expiry
     redis_client.setex(f"refresh_token:{token}", 30 * 24 * 3600, user_id)
     return token
+
 
 def generate_otp(identifier, email=None):
     """Generate a 6-digit OTP, store in Redis, and (optionally) email it.
@@ -64,7 +58,7 @@ def generate_otp(identifier, email=None):
     from app.email import send_otp_email
 
     redis_client = get_redis_client()
-    otp = ''.join(random.choices(string.digits, k=6))
+    otp = "".join(secrets.choice(string.digits) for _ in range(6))
     # 300s TTL
     redis_client.setex(f"otp:{identifier}", 300, otp)
 
@@ -75,6 +69,7 @@ def generate_otp(identifier, email=None):
 
     return otp
 
+
 def verify_otp(mobile_number, otp):
     redis_client = get_redis_client()
     key = f"otp:{mobile_number}"
@@ -83,6 +78,7 @@ def verify_otp(mobile_number, otp):
         redis_client.delete(key)
         return True
     return False
+
 
 def generate_reset_token(user_id, email=None):
     """Generate a password-reset token, store in Redis, and (optionally) email it.
@@ -105,6 +101,7 @@ def generate_reset_token(user_id, email=None):
 
     return token
 
+
 def verify_reset_token(token):
     redis_client = get_redis_client()
     user_id = redis_client.get(f"reset:{token}")
@@ -112,10 +109,10 @@ def verify_reset_token(token):
         return None
     return user_id
 
+
 def generate_team_invite(store_id):
     redis_client = get_redis_client()
-    invite_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    invite_code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
     # 24 hours TTL
     redis_client.setex(f"invite:{invite_code}", 24 * 3600, store_id)
     return invite_code
-

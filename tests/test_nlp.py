@@ -27,9 +27,11 @@ def test_resolve_intent_precedence():
     assert resolve_intent("Hello there") == "default"
     assert resolve_intent("") == "default"
 
+
 def test_resolve_too_long():
-    long_query = "What is the forecast? " * 50 # > 200 chars
+    long_query = "What is the forecast? " * 50  # > 200 chars
     assert resolve_intent(long_query) == "default"
+
 
 def test_format_percentage():
     assert format_percentage(5.678) == "5.7%"
@@ -38,11 +40,13 @@ def test_format_percentage():
     assert format_percentage(-1.9) == "Stable (<2% change)"
     assert format_percentage(0.0) == "0.0%"
 
+
 def test_format_currency():
     assert format_currency(1234567.89) == "₹12,34,567.89"
     assert format_currency(500.0) == "₹500.00"
     assert format_currency(1000.5) == "₹1,000.50"
     assert format_currency(150000.0) == "₹1,50,000.00"
+
 
 def test_format_unit():
     assert format_unit(1.0) == "1 unit"

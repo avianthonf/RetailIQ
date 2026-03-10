@@ -1,8 +1,9 @@
 """
 tests/test_chain.py — Chain Ownership & Multi-store Integration Tests
 """
+
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -24,6 +25,7 @@ from app.models import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def chain_group(app, test_owner, test_store):
     """Create a store group owned by the test owner and return (group, headers)."""
@@ -31,8 +33,8 @@ def chain_group(app, test_owner, test_store):
     db.session.add(group)
     db.session.commit()
     # Re-generate token so chain_group_id is injected
-    token = generate_access_token(test_owner.user_id, test_store.store_id, 'owner')
-    headers = {'Authorization': f'Bearer {token}'}
+    token = generate_access_token(test_owner.user_id, test_store.store_id, "owner")
+    headers = {"Authorization": f"Bearer {token}"}
     return group, headers
 
 
@@ -58,42 +60,41 @@ def two_store_chain(app, chain_group, test_owner, test_store):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_chain_dashboard_requires_chain_role(client, owner_headers):
     """A normal owner token (no StoreGroup) must get 403 on chain endpoints."""
-    res = client.get('/api/v1/chain/dashboard', headers=owner_headers)
+    res = client.get("/api/v1/chain/dashboard", headers=owner_headers)
     assert res.status_code == 403
-    assert res.json['error']['code'] == 'FORBIDDEN'
+    assert res.json["error"]["code"] == "FORBIDDEN"
 
 
 def test_chain_dashboard_returns_all_stores(app, client, two_store_chain):
     group, store1_id, store2_id, headers = two_store_chain
 
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     agg1 = ChainDailyAggregate(
-        group_id=group.id, store_id=store1_id,
-        date=today, revenue=1000, profit=500, transaction_count=10
+        group_id=group.id, store_id=store1_id, date=today, revenue=1000, profit=500, transaction_count=10
     )
     agg2 = ChainDailyAggregate(
-        group_id=group.id, store_id=store2_id,
-        date=today, revenue=2000, profit=1000, transaction_count=20
+        group_id=group.id, store_id=store2_id, date=today, revenue=2000, profit=1000, transaction_count=20
     )
     db.session.add_all([agg1, agg2])
     db.session.commit()
 
-    res = client.get('/api/v1/chain/dashboard', headers=headers)
+    res = client.get("/api/v1/chain/dashboard", headers=headers)
     assert res.status_code == 200
-    data = res.json['data']
+    data = res.json["data"]
 
     # Check total revenue
-    assert float(data['total_revenue_today']) == 3000.0
+    assert float(data["total_revenue_today"]) == 3000.0
     # Both stores present
-    assert len(data['per_store_today']) == 2
-    store_ids_in_response = {s['store_id'] for s in data['per_store_today']}
+    assert len(data["per_store_today"]) == 2
+    store_ids_in_response = {s["store_id"] for s in data["per_store_today"]}
     assert store1_id in store_ids_in_response
     assert store2_id in store_ids_in_response
     # Store 2 is best (2000) and Store 1 is worst (1000)
-    assert data['best_store']['store_id'] == store2_id
-    assert data['worst_store']['store_id'] == store1_id
+    assert data["best_store"]["store_id"] == store2_id
+    assert data["worst_store"]["store_id"] == store1_id
 
 
 def test_chain_jwt_does_not_break_single_store_endpoints(client, chain_group):
@@ -102,7 +103,7 @@ def test_chain_jwt_does_not_break_single_store_endpoints(client, chain_group):
     endpoints like /api/v1/analytics/dashboard (scoped to its own store_id).
     """
     _, headers = chain_group
-    res = client.get('/api/v1/analytics/dashboard', headers=headers)
+    res = client.get("/api/v1/analytics/dashboard", headers=headers)
     assert res.status_code == 200
 
 
@@ -123,9 +124,13 @@ def test_transfer_detection_creates_suggestion(app, two_store_chain):
 
     # Product in store 1 (low stock)
     p1 = Product(
-        name="Critical Product", category_id=cat.category_id,
-        store_id=store1_id, selling_price=10.0, cost_price=5.0,
-        current_stock=2, reorder_level=10
+        name="Critical Product",
+        category_id=cat.category_id,
+        store_id=store1_id,
+        selling_price=10.0,
+        cost_price=5.0,
+        current_stock=2,
+        reorder_level=10,
     )
     db.session.add(p1)
     db.session.commit()
@@ -136,18 +141,24 @@ def test_transfer_detection_creates_suggestion(app, two_store_chain):
     db.session.commit()
 
     p2 = Product(
-        name="Critical Product", category_id=cat2.category_id,
-        store_id=store2_id, selling_price=10.0, cost_price=5.0,
-        current_stock=30, reorder_level=10
+        name="Critical Product",
+        category_id=cat2.category_id,
+        store_id=store2_id,
+        selling_price=10.0,
+        cost_price=5.0,
+        current_stock=30,
+        reorder_level=10,
     )
     db.session.add(p2)
     db.session.commit()
 
     # Create CRITICAL LOW_STOCK alert on store 1
     alert = Alert(
-        store_id=store1_id, product_id=p1.product_id,
-        alert_type="LOW_STOCK", priority="CRITICAL",
-        message="Low stock on Critical Product"
+        store_id=store1_id,
+        product_id=p1.product_id,
+        alert_type="LOW_STOCK",
+        priority="CRITICAL",
+        message="Low stock on Critical Product",
     )
     db.session.add(alert)
     db.session.commit()
@@ -160,44 +171,40 @@ def test_transfer_detection_creates_suggestion(app, two_store_chain):
         to_store_id=store1_id,
         product_id=p1.product_id,
         suggested_qty=10.0,
-        reason=f"Surplus identified in sibling Store {store2_id}"
+        reason=f"Surplus identified in sibling Store {store2_id}",
     )
     db.session.add(suggestion)
     db.session.commit()
 
     # Verify the suggestion was created correctly
-    result = db.session.query(InterStoreTransferSuggestion).filter_by(
-        group_id=group.id
-    ).first()
+    result = db.session.query(InterStoreTransferSuggestion).filter_by(group_id=group.id).first()
     assert result is not None
     assert result.from_store_id == store2_id
     assert result.to_store_id == store1_id
     assert float(result.suggested_qty) == 10.0
-    assert result.status == 'PENDING'
+    assert result.status == "PENDING"
 
 
 def test_chain_compare_relative_coding(app, client, two_store_chain):
     group, store1_id, store2_id, headers = two_store_chain
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
 
     # Both stores have identical revenue => both should be 'near'
     agg1 = ChainDailyAggregate(
-        group_id=group.id, store_id=store1_id,
-        date=today, revenue=1000, profit=500, transaction_count=10
+        group_id=group.id, store_id=store1_id, date=today, revenue=1000, profit=500, transaction_count=10
     )
     agg2 = ChainDailyAggregate(
-        group_id=group.id, store_id=store2_id,
-        date=today, revenue=1000, profit=1000, transaction_count=20
+        group_id=group.id, store_id=store2_id, date=today, revenue=1000, profit=1000, transaction_count=20
     )
     db.session.add_all([agg1, agg2])
     db.session.commit()
 
-    res = client.get('/api/v1/chain/compare?period=today', headers=headers)
+    res = client.get("/api/v1/chain/compare?period=today", headers=headers)
     assert res.status_code == 200
 
-    data = res.json['data']
+    data = res.json["data"]
     for comp in data:
-        assert comp['relative_to_avg'] == 'near'
+        assert comp["relative_to_avg"] == "near"
 
 
 def test_add_store_to_group(client, chain_group, test_owner):
@@ -207,12 +214,6 @@ def test_add_store_to_group(client, chain_group, test_owner):
     db.session.add(store3)
     db.session.commit()
 
-    res = client.post(
-        f'/api/v1/chain/groups/{group.id}/stores',
-        headers=headers,
-        json={"store_id": store3.store_id}
-    )
+    res = client.post(f"/api/v1/chain/groups/{group.id}/stores", headers=headers, json={"store_id": store3.store_id})
     assert res.status_code == 201
-    assert db.session.query(StoreGroupMembership).filter_by(
-        store_id=store3.store_id, group_id=group.id
-    ).count() == 1
+    assert db.session.query(StoreGroupMembership).filter_by(store_id=store3.store_id, group_id=group.id).count() == 1

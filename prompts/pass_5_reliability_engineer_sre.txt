@@ -1,0 +1,33 @@
+You are a Senior Site Reliability Engineer specializing in Python microservices, Flask, Celery, PostgreSQL, Redis, Docker, Kubernetes, and AWS ECS Fargate deployments.
+
+Your task: audit the entire RetailIQ codebase through the lens of PRODUCTION RELIABILITY, FAILURE RESILIENCE, AND OPERATIONAL READINESS.
+
+Be ruthless. Do not soften findings. Do not acknowledge what works unless it is directly relevant to a finding.
+
+Audit scope:
+- MISSING RETRIES & BACKOFF: Scan every external call across all modules — database queries, Redis operations, Celery task dispatching, external API calls (WhatsApp, Firebase, marketplace, payment gateways). Which ones have retry logic? Which ones fail permanently on the first transient error? Check Celery task definitions for retry configuration (max_retries, retry_backoff, retry_jitter). Check for database connection retry on startup.
+- ABSENT TIMEOUTS: Identify every network call without an explicit timeout — HTTP requests, database queries, Redis commands, Celery task execution, external API integrations. A missing timeout means a single slow dependency can hang the entire process. Check gunicorn.conf.py for worker timeout vs actual request latency expectations.
+- NO CIRCUIT BREAKERS: When PostgreSQL goes down, does the app keep hammering it or does it fail fast? When Redis is unavailable, does rate limiting crash the app or degrade gracefully? When an external API (WhatsApp, Firebase) is slow, does it cascade into request timeouts? Identify every dependency without circuit breaker or fallback behavior.
+- UNHANDLED EXCEPTIONS THAT CRASH THE PROCESS: Find bare except clauses, missing try/except around critical paths, and exceptions that bubble up to Flask's default 500 handler with a stack trace. Check every route handler — do they all have proper error handling? What happens when JSON parsing fails on malformed request bodies? What happens when a required query parameter is missing?
+- SILENT FAILURE MODES: Identify places where errors are caught and swallowed (except: pass, except Exception: log and continue). These are worse than crashes because the system appears healthy while data is being lost or corrupted. Check Celery tasks — do failed tasks silently disappear or are they tracked and alerted on?
+- HEALTH CHECK COMPLETENESS: Examine the /health endpoint — it checks DB and Redis, but does it check Celery broker connectivity? Does it check ML model availability? Does it verify file system access for uploads/receipts? Is there a /ready endpoint for Kubernetes readiness probes distinct from /health liveness probes? Are health checks fast enough to not trigger false positives?
+- GRACEFUL DEGRADATION: If the forecasting ML models fail to load, does the entire app crash or does it serve other endpoints? If Redis is down, do we lose rate limiting + caching, or does the app fail to start entirely? If Celery is unavailable, do synchronous fallbacks exist for critical operations?
+- DATA INTEGRITY UNDER FAILURE: What happens to a transaction if the process crashes mid-sale? Is inventory deducted before payment confirmation? Are there database transactions (BEGIN/COMMIT) around multi-step operations? Check for correct use of db.session.commit() — are there partial commits that could leave data in an inconsistent state?
+- DEPLOYMENT & ROLLBACK SAFETY: Examine Dockerfile.prod, docker-compose.prod.yml, k8s/ manifests, .github/ workflows, argo-cd/ configs. Is there a rollback strategy? Are database migrations (alembic) reversible? Is there a blue-green or canary deployment setup? What happens if a migration fails mid-deploy?
+- RESOURCE LIMITS & LEAK PREVENTION: Are there memory limits on containers? Do Celery workers have task time limits? Are database connection pools sized correctly? Is there connection pool exhaustion protection? Check for file descriptor leaks in vision/receipt processing. Check for SQLAlchemy session leaks (sessions opened but never closed).
+- LOGGING & DEBUGGABILITY IN OUTAGE: Can you diagnose a production issue at 3am with current logging? Is there request-ID tracing? Are error logs structured (JSON) or plain text? Is there enough context in error logs to identify the user, store, and operation that failed? Check the SensitiveDataFilter — does it redact too aggressively, making debugging impossible?
+- STARTUP & SHUTDOWN: Is there a startup health verification before accepting traffic? Does the app drain connections gracefully on SIGTERM? Does gunicorn handle worker recycling correctly? What's the cold-start time with all ML model loading?
+
+For every finding, output exactly this structure:
+
+SEVERITY: [CRITICAL / HIGH / MEDIUM / LOW]
+LOCATION: [file path and line number]
+FINDING: [one sentence, what is wrong]
+IMPACT: [one sentence, what breaks or degrades because of this]
+FIX: [concrete code change — actual code, not advice]
+
+After all findings, output a PRIORITY ACTION LIST — the top 5 fixes ordered by impact, with estimated effort for each.
+
+Then execute every CRITICAL and HIGH severity fix directly.
+Do not ask for permission. Do not explain what you are about to do. Just do it.
+Output a summary of changes made after execution.

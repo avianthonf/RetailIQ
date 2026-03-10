@@ -6,13 +6,15 @@ from app.auth.decorators import require_auth
 from app.nlp.router import resolve_intent
 from app.nlp.templates import TEMPLATES, format_currency, format_percentage, format_unit
 
-nlp_bp = Blueprint('nlp', __name__)
+nlp_bp = Blueprint("nlp", __name__)
 
-@nlp_bp.route('/', methods=['POST'])
+
+@nlp_bp.route("/", methods=["POST"])
 @require_auth
 def handle_query():
     from flask import g
-    store_id = g.current_user['store_id']
+
+    store_id = g.current_user["store_id"]
     query = request.json.get("query_text", "")
 
     intent = resolve_intent(query)
@@ -24,11 +26,14 @@ def handle_query():
     supporting_metrics = {}
 
     if intent == "forecast":
-        row = db.session.execute(text("""
+        row = db.session.execute(
+            text("""
             SELECT SUM(forecast_value) as fc, MAX(regime) as reg
             FROM forecast_cache
             WHERE store_id = :sid AND forecast_date >= CURRENT_DATE AND forecast_date < CURRENT_DATE + 7
-        """), {"sid": store_id}).fetchone()
+        """),
+            {"sid": store_id},
+        ).fetchone()
         fc = float(row.fc or 0.0) if row and row.fc else 0.0
         reg = (row.reg or "Stable") if row else "Stable"
         detail = tmpl["detail_template"].format(forecast=format_unit(fc), regime=reg)
@@ -37,7 +42,8 @@ def handle_query():
 
     elif intent == "inventory":
         # Fetch most critical inventory item
-        row = db.session.execute(text("""
+        row = db.session.execute(
+            text("""
             SELECT p.product_id, p.name, p.current_stock, p.reorder_level,
                    (p.reorder_level - p.current_stock) as deficit
             FROM products p
@@ -45,18 +51,20 @@ def handle_query():
                   AND p.current_stock <= p.reorder_level
             ORDER BY deficit DESC
             LIMIT 1
-        """), {"sid": store_id}).fetchone()
+        """),
+            {"sid": store_id},
+        ).fetchone()
         if row:
             detail = tmpl["detail_template"].format(
                 stock=format_unit(float(row.current_stock or 0)),
                 reorder=format_unit(float(row.reorder_level or 0)),
-                deficit=format_unit(float(row.deficit or 0))
+                deficit=format_unit(float(row.deficit or 0)),
             )
             supporting_metrics = {
                 "product_id": row.product_id,
                 "product_name": row.name,
                 "current_stock": float(row.current_stock or 0),
-                "reorder_level": float(row.reorder_level or 0)
+                "reorder_level": float(row.reorder_level or 0),
             }
         else:
             detail = "All products are above their reorder levels."
@@ -66,10 +74,13 @@ def handle_query():
         # Cache CURRENT_DATE once instead of subquerying per row
         current_date = db.session.execute(text("SELECT CURRENT_DATE")).scalar()
 
-        store_hist = db.session.execute(text("""
+        store_hist = db.session.execute(
+            text("""
             SELECT date, revenue FROM daily_store_summary
             WHERE store_id = :sid AND date >= CURRENT_DATE - 8 AND date <= CURRENT_DATE
-        """), {"sid": store_id}).fetchall()
+        """),
+            {"sid": store_id},
+        ).fetchall()
 
         today_rev = 0.0
         past_7 = []
@@ -89,21 +100,28 @@ def handle_query():
 
     elif intent == "profit":
         # Aggregate margin data across active products
-        rows = db.session.execute(text("""
+        rows = db.session.execute(
+            text("""
             SELECT AVG(CASE WHEN selling_price > 0
                         THEN (selling_price - cost_price) / selling_price * 100
                         ELSE 0 END) as avg_margin,
                    COUNT(*) as product_count
             FROM products
             WHERE store_id = :sid AND is_active = TRUE AND cost_price IS NOT NULL AND selling_price IS NOT NULL
-        """), {"sid": store_id}).fetchone()
+        """),
+            {"sid": store_id},
+        ).fetchone()
         avg_margin = float(rows.avg_margin or 0.0) if rows else 0.0
         detail = tmpl["detail_template"].format(margin=format_percentage(avg_margin))
-        supporting_metrics = {"avg_margin_pct": round(avg_margin, 1), "product_count": int(rows.product_count or 0) if rows else 0}
+        supporting_metrics = {
+            "avg_margin_pct": round(avg_margin, 1),
+            "product_count": int(rows.product_count or 0) if rows else 0,
+        }
 
     elif intent == "top_products":
         # Top 5 by revenue last 30 days
-        rows = db.session.execute(text("""
+        rows = db.session.execute(
+            text("""
             SELECT d.product_id, p.name, SUM(d.revenue) as total_rev, SUM(d.units_sold) as total_units
             FROM daily_sku_summary d
             JOIN products p ON p.product_id = d.product_id
@@ -111,11 +129,20 @@ def handle_query():
             GROUP BY d.product_id, p.name
             ORDER BY total_rev DESC, d.product_id ASC
             LIMIT 5
-        """), {"sid": store_id}).fetchall()
+        """),
+            {"sid": store_id},
+        ).fetchall()
 
         if rows:
-            top_list = [{"product_id": r.product_id, "name": r.name,
-                         "revenue": float(r.total_rev or 0), "units": float(r.total_units or 0)} for r in rows]
+            top_list = [
+                {
+                    "product_id": r.product_id,
+                    "name": r.name,
+                    "revenue": float(r.total_rev or 0),
+                    "units": float(r.total_units or 0),
+                }
+                for r in rows
+            ]
             detail = tmpl["detail_template"].format(
                 value=", ".join(f"{r['name']} ({format_currency(r['revenue'])})" for r in top_list)
             )
@@ -125,10 +152,12 @@ def handle_query():
 
     elif intent == "loyalty_summary":
         from datetime import datetime, timezone
+
         today = datetime.now(timezone.utc)
         start_date = f"{today.year}-{today.month:02d}-01"
 
-        row = db.session.execute(text("""
+        row = db.session.execute(
+            text("""
             SELECT
                 (SELECT COUNT(*) FROM customer_loyalty_accounts WHERE store_id = :sid) as enrolled,
                 (SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions lt
@@ -137,21 +166,28 @@ def handle_query():
                 (SELECT COALESCE(SUM(points), 0) FROM loyalty_transactions lt
                  JOIN customer_loyalty_accounts c ON c.id = lt.account_id
                  WHERE c.store_id = :sid AND lt.type = 'REDEEM' AND lt.created_at >= :start_date) as redeemed
-        """), {"sid": store_id, "start_date": start_date}).fetchone()
+        """),
+            {"sid": store_id, "start_date": start_date},
+        ).fetchone()
 
         enrolled = int(row.enrolled) if row else 0
         issued = float(row.issued) if row else 0
         redeemed = abs(float(row.redeemed)) if row else 0
 
-        detail = tmpl["detail_template"].format(enrolled=enrolled, issued=format_unit(issued, 'point'), redeemed=format_unit(redeemed, 'point'))
+        detail = tmpl["detail_template"].format(
+            enrolled=enrolled, issued=format_unit(issued, "point"), redeemed=format_unit(redeemed, "point")
+        )
         supporting_metrics = {"enrolled_customers": enrolled, "points_issued": issued, "points_redeemed": redeemed}
 
     elif intent == "credit_overdue":
-        row = db.session.execute(text("""
+        row = db.session.execute(
+            text("""
             SELECT COUNT(*) as overdue_count, COALESCE(SUM(balance), 0) as total_overdue
             FROM credit_ledger
             WHERE store_id = :sid AND balance > 0 AND updated_at < CURRENT_DATE - 30
-        """), {"sid": store_id}).fetchone()
+        """),
+            {"sid": store_id},
+        ).fetchone()
 
         count = int(row.overdue_count) if row else 0
         total_overdue = float(row.total_overdue) if row else 0
@@ -159,16 +195,69 @@ def handle_query():
         detail = tmpl["detail_template"].format(count=count, total_overdue=format_currency(total_overdue))
         supporting_metrics = {"overdue_customers": count, "total_overdue_amount": total_overdue}
 
-    else:
-        detail = tmpl["detail_template"].format(value="system baseline", stock="0", reorder="0", deficit="0", margin="0")
+    elif intent == "market_intelligence":
+        from app.market_intelligence.engine import IntelligenceEngine
 
-    return jsonify({
-        "status": "success",
-        "data": {
-            "intent": intent,
-            "headline": headline,
-            "detail": detail,
-            "action": action,
-            "supporting_metrics": supporting_metrics
+        try:
+            market_summary = IntelligenceEngine.get_market_summary()
+            alerts = market_summary.get("active_alerts", 0)
+            status = "Elevated volatility" if alerts > 0 else "Stable conditions"
+
+            detail = tmpl["detail_template"].format(status=status, active_alerts=alerts)
+            supporting_metrics = market_summary
+        except Exception as e:
+            detail = "Unable to fetch real-time market intelligence at this moment."
+            supporting_metrics = {}
+
+    else:
+        detail = tmpl["detail_template"].format(
+            value="system baseline", stock="0", reorder="0", deficit="0", margin="0"
+        )
+
+    return jsonify(
+        {
+            "status": "success",
+            "data": {
+                "intent": intent,
+                "headline": headline,
+                "detail": detail,
+                "action": action,
+                "supporting_metrics": supporting_metrics,
+            },
         }
-    }), 200
+    ), 200
+
+
+# ── V2 AI NLP & Recommendations ───────────────────────────────────────────────
+
+
+@nlp_bp.route("/v2/ai/nlp/query", methods=["POST"])
+@require_auth
+def nlp_query_v2():
+    from flask import g
+
+    store_id = g.current_user["store_id"]
+    data = request.json or {}
+    query_text = data.get("query")
+    if not query_text:
+        return jsonify({"message": "query is required"}), 400
+
+    from .assistant import handle_assistant_query
+
+    response = handle_assistant_query(query_text, store_id)
+    return jsonify({"response": response}), 200
+
+
+@nlp_bp.route("/v2/ai/recommend", methods=["POST"])
+@require_auth
+def recommend_v2():
+    from flask import g
+
+    store_id = g.current_user["store_id"]
+    data = request.json or {}
+    user_id = data.get("user_id")  # Optional fallback
+
+    from .recommender import get_ai_recommendations
+
+    recs = get_ai_recommendations(user_id, store_id)
+    return jsonify({"recommendations": recs}), 200

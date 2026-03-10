@@ -1,0 +1,14 @@
+collector:
+  host-port: :14267
+  zipkin:
+    host-port: :9411
+  sampling:
+    strategies-file: /etc/jaeger/sampling_strategies.json
+    default-strategy:
+      type: probabilistic
+      param: 0.1 # 10% sampling for production
+storage:
+  type: cassandra # Or elasticsearch, depending on infrastructure choice
+  cassandra:
+    servers: [cassandra-cluster.monitoring.svc.cluster.local]
+    keyspace: jaeger_v1_region

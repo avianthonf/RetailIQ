@@ -6,7 +6,10 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — compile wheels for all Python dependencies
 # ---------------------------------------------------------------------------
-FROM python:3.10-slim-bookworm AS builder
+# ---------------------------------------------------------------------------
+# Stage 1: Builder — compile wheels for all Python dependencies
+# ---------------------------------------------------------------------------
+FROM python:3.10-slim-bullseye AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -22,62 +25,63 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt
 
-# ---------------------------------------------------------------------------
-# Stage 2: Runtime — lean production image
-# ---------------------------------------------------------------------------
-FROM python:3.10-slim-bookworm AS runtime
-
-# Labels for container registry metadata
-LABEL org.opencontainers.image.title="RetailIQ API" \
-      org.opencontainers.image.description="Flask + Gunicorn production API" \
-      org.opencontainers.image.vendor="RetailIQ"
-
-# Install only runtime system libraries (no compilers)
+# --- Stage 2: Installer ---
+FROM python:3.10-slim-bullseye AS installer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf2.0-0 \
-    libffi8 \
-    curl \
-    tini \
-    postgresql-client \
+    libffi7 \
     && rm -rf /var/lib/apt/lists/*
 
-# Python tuning
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
 WORKDIR /app
-
-# Install pre-built wheels (no compilation needed)
 COPY --from=builder /build/wheels /tmp/wheels
 COPY requirements.txt .
 RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requirements.txt \
     && rm -rf /tmp/wheels
 
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+# --- Stage 3: Runtime — hardened distroless image ---
+FROM gcr.io/distroless/python3-debian11:nonroot AS runtime
 
-# Copy application code
-COPY --chown=appuser:appuser . .
+# Labels for container registry metadata
+LABEL org.opencontainers.image.title="RetailIQ API" \
+      org.opencontainers.image.description="Flask + Gunicorn production API (Distroless)" \
+      org.opencontainers.image.vendor="RetailIQ"
 
-# Make scripts executable
-RUN chmod +x scripts/entrypoint.sh scripts/start-app.sh
+# Python tuning
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+# Copy site-packages and binaries from installer
+COPY --from=installer /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=installer /usr/local/bin /usr/local/bin
+
+# Copy system libraries needed by C extensions (psycopg2, cairo, etc.)
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libpq.so.5 /usr/lib/x86_64-linux-gnu/libpq.so.5
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2 /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libkrb5.so.3 /usr/lib/x86_64-linux-gnu/libkrb5.so.3
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libk5crypto.so.3 /usr/lib/x86_64-linux-gnu/libk5crypto.so.3
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libcom_err.so.2 /usr/lib/x86_64-linux-gnu/libcom_err.so.2
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libkrb5support.so.0 /usr/lib/x86_64-linux-gnu/libkrb5support.so.0
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libcairo.so.2 /usr/lib/x86_64-linux-gnu/libcairo.so.2
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libpango-1.0.so.0 /usr/lib/x86_64-linux-gnu/libpango-1.0.so.0
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libpangocairo-1.0.so.0 /usr/lib/x86_64-linux-gnu/libpangocairo-1.0.so.0
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so.0 /usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so.0
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2 /usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2
+COPY --from=installer /usr/lib/x86_64-linux-gnu/liblber-2.4.so.2 /usr/lib/x86_64-linux-gnu/liblber-2.4.so.2
+COPY --from=installer /usr/lib/x86_64-linux-gnu/libsasl2.so.2 /usr/lib/x86_64-linux-gnu/libsasl2.so.2
+
+# Copy app code
+COPY --chown=nonroot:nonroot . .
 
 EXPOSE 5000
 
-# Use tini as PID 1 for proper signal handling
-ENTRYPOINT ["tini", "--"]
-
-# Default: API service. Override CMD for worker/beat via SERVICE_ROLE env var.
-CMD ["scripts/entrypoint.sh"]
-
-# Health check for container orchestrators
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
-USER appuser
+# Distroless entrypoint
+ENTRYPOINT ["/usr/bin/python3"]
+CMD ["-m", "gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]

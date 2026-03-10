@@ -79,13 +79,16 @@ def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
     monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: fake)
 
     # 1. Register a new user
-    register_resp = client.post("/api/v1/auth/register", json={
-        "full_name": "OTP Test User",
-        "mobile_number": "9222222222",
-        "password": "secret123",
-        "store_name": "OTP Store",
-        "email": "otp_test@example.com",
-    })
+    register_resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "OTP Test User",
+            "mobile_number": "9222222222",
+            "password": "secret123",
+            "store_name": "OTP Store",
+            "email": "otp_test@example.com",
+        },
+    )
     assert register_resp.status_code == 201
 
     # Grab the OTP from the fake redis
@@ -93,10 +96,13 @@ def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
     assert otp is not None
 
     # 2. Verify OTP
-    verify_resp = client.post("/api/v1/auth/verify-otp", json={
-        "mobile_number": "9222222222",
-        "otp": otp,
-    })
+    verify_resp = client.post(
+        "/api/v1/auth/verify-otp",
+        json={
+            "mobile_number": "9222222222",
+            "otp": otp,
+        },
+    )
     assert verify_resp.status_code == 200
 
     data = verify_resp.get_json()
@@ -121,4 +127,3 @@ def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
         json={"refresh_token": verify_data["refresh_token"]},
     )
     assert protected_resp.status_code == 200
-

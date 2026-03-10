@@ -6,34 +6,10 @@ from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..models import Category, Product, Store
 from .schemas import CategorySchema, StoreProfileSchema, TaxConfigSchema
+from .services import StoreService
+from app.utils.responses import standard_json
 
-store_bp = Blueprint('store', __name__)
-
-# ---------------------------------------------------------------------------
-# Default categories seeded on first store-type assignment
-# ---------------------------------------------------------------------------
-DEFAULT_CATEGORIES = {
-    'grocery':     ['Beverages', 'Dairy', 'Snacks', 'Staples', 'Household', 'Personal Care'],
-    'pharmacy':    ['OTC Medicine', 'Vitamins', 'Personal Care', 'Baby Care', 'Equipment'],
-    'electronics': ['Mobile & Tablets', 'Laptops', 'Accessories', 'Audio', 'Home Appliances', 'Cameras'],
-    'clothing':    ['Men', 'Women', 'Kids', 'Footwear', 'Accessories', 'Sports'],
-    'general':     ['Food', 'Beverages', 'Household', 'Clothing', 'Electronics', 'Stationery'],
-    'other':       ['Category 1', 'Category 2', 'Category 3'],
-}
-
-MAX_CATEGORIES = 50
-
-
-def standard_response(data=None, message="Success", status_code=200, **kwargs):
-    """Standard JSON envelope used across the store module."""
-    response = {
-        "status": "success" if status_code < 400 else "error",
-        "message": message,
-    }
-    if data is not None:
-        response["data"] = data
-    response.update(kwargs)
-    return response, status_code
+store_bp = Blueprint("store", __name__)
 
 
 # ---------------------------------------------------------------------------
@@ -41,32 +17,29 @@ def standard_response(data=None, message="Success", status_code=200, **kwargs):
 #                   PUT /api/v1/store/profile
 # ---------------------------------------------------------------------------
 
-@store_bp.route('/profile', methods=['GET'])
+
+@store_bp.route("/profile", methods=["GET"])
 @require_auth
 def get_profile():
-    store = db.session.scalar(
-        select(Store).filter_by(store_id=g.current_user['store_id'])
-    )
+    store = db.session.scalar(select(Store).filter_by(store_id=g.current_user["store_id"]))
     if not store:
-        return standard_response(message="Store not found", status_code=404)
-    return standard_response(data=StoreProfileSchema().dump(store))
+        return standard_json(success=False, message="Store not found", status_code=404)
+    return standard_json(data=StoreProfileSchema().dump(store))
 
 
-@store_bp.route('/profile', methods=['PUT'])
+@store_bp.route("/profile", methods=["PUT"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def update_profile():
     schema = StoreProfileSchema()
     try:
         data = schema.load(request.json or {}, partial=True)
     except ValidationError as err:
-        return standard_response(message="Validation error", status_code=400, errors=err.messages)
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    store = db.session.scalar(
-        select(Store).filter_by(store_id=g.current_user['store_id'])
-    )
+    store = db.session.scalar(select(Store).filter_by(store_id=g.current_user["store_id"]))
     if not store:
-        return standard_response(message="Store not found", status_code=404)
+        return standard_json(success=False, message="Store not found", status_code=404)
 
     # Expire the cached object so we get a fresh read from the DB
     db.session.expire(store)
@@ -80,27 +53,14 @@ def update_profile():
     for key, value in data.items():
         setattr(store, key, value)
 
-    # Seed default categories when store_type is assigned for the first time
-    if (
-        is_first_setup
-        and 'store_type' in data
-        and data['store_type'] in DEFAULT_CATEGORIES
-    ):
-        existing_count = db.session.scalar(
-            select(db.func.count(Category.category_id))
-            .where(Category.store_id == store.store_id)
-        ) or 0
-
-        if existing_count == 0:
-            for cat_name in DEFAULT_CATEGORIES[data['store_type']]:
-                db.session.add(Category(
-                    store_id=store.store_id,
-                    name=cat_name,
-                    gst_rate=0.0,
-                ))
-
     db.session.commit()
-    return standard_response(message="Store profile updated", data=schema.dump(store))
+
+    # Seed default categories when store_type is assigned for the first time
+    if is_first_setup and "store_type" in data:
+        StoreService.seed_default_categories(store.store_id, data["store_type"])
+        db.session.commit()
+
+    return standard_json(message="Store profile updated", data=schema.dump(store))
 
 
 # ---------------------------------------------------------------------------
@@ -110,103 +70,97 @@ def update_profile():
 #                DELETE /api/v1/store/categories/<id>
 # ---------------------------------------------------------------------------
 
-@store_bp.route('/categories', methods=['GET'])
+
+@store_bp.route("/categories", methods=["GET"])
 @require_auth
 def list_categories():
-    categories = db.session.scalars(
-        select(Category).filter_by(store_id=g.current_user['store_id'])
-    ).all()
-    return standard_response(data=CategorySchema(many=True).dump(categories))
+    categories = db.session.scalars(select(Category).filter_by(store_id=g.current_user["store_id"])).all()
+    return standard_json(data=CategorySchema(many=True).dump(categories))
 
 
-@store_bp.route('/categories', methods=['POST'])
+@store_bp.route("/categories", methods=["POST"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def create_category():
-    # Enforce the 50-category cap
-    category_count = db.session.scalar(
-        select(db.func.count(Category.category_id))
-        .filter_by(store_id=g.current_user['store_id'])
-    ) or 0
-
-    if category_count >= MAX_CATEGORIES:
-        return standard_response(
-            message=f"Maximum of {MAX_CATEGORIES} categories allowed per store",
-            status_code=400,
+    if StoreService.is_category_limit_reached(g.current_user["store_id"]):
+        return standard_json(
+            success=False,
+            message="Maximum of 50 categories allowed per store reached",
+            status_code=422,
         )
 
     schema = CategorySchema()
     try:
         data = schema.load(request.json or {})
     except ValidationError as err:
-        return standard_response(message="Validation error", status_code=400, errors=err.messages)
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    new_cat = Category(store_id=g.current_user['store_id'], **data)
+    new_cat = Category(store_id=g.current_user["store_id"], **data)
     db.session.add(new_cat)
     db.session.commit()
-    return standard_response(
-        message="Category created", data=schema.dump(new_cat), status_code=201
-    )
+    return standard_json(message="Category created", data=schema.dump(new_cat), status_code=201)
 
 
-@store_bp.route('/categories/<int:category_id>', methods=['PUT'])
+@store_bp.route("/categories/<int:category_id>", methods=["PUT"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def update_category(category_id):
     schema = CategorySchema()
     try:
         data = schema.load(request.json or {}, partial=True)
     except ValidationError as err:
-        return standard_response(message="Validation error", status_code=400, errors=err.messages)
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
     category = db.session.scalar(
         select(Category).filter_by(
             category_id=category_id,
-            store_id=g.current_user['store_id'],
+            store_id=g.current_user["store_id"],
         )
     )
     if not category:
-        return standard_response(message="Category not found", status_code=404)
+        return standard_json(success=False, message="Category not found", status_code=404)
 
     for key, value in data.items():
         setattr(category, key, value)
 
     db.session.commit()
-    return standard_response(message="Category updated", data=schema.dump(category))
+    return standard_json(message="Category updated", data=schema.dump(category))
 
 
-@store_bp.route('/categories/<int:category_id>', methods=['DELETE'])
+@store_bp.route("/categories/<int:category_id>", methods=["DELETE"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def delete_category(category_id):
     category = db.session.scalar(
         select(Category).filter_by(
             category_id=category_id,
-            store_id=g.current_user['store_id'],
+            store_id=g.current_user["store_id"],
         )
     )
     if not category:
-        return standard_response(message="Category not found", status_code=404)
+        return standard_json(success=False, message="Category not found", status_code=404)
 
     # Rule: cannot hard-delete when products are still assigned – deactivate instead
-    product_count = db.session.scalar(
-        select(db.func.count(Product.product_id))
-        .filter_by(category_id=category_id, store_id=g.current_user['store_id'])
-    ) or 0
+    product_count = (
+        db.session.scalar(
+            select(db.func.count(Product.product_id)).filter_by(
+                category_id=category_id, store_id=g.current_user["store_id"]
+            )
+        )
+        or 0
+    )
 
     if product_count > 0:
-        return standard_response(
-            message=(
-                "Cannot delete category with assigned products. "
-                "Please reassign or delete products first."
-            ),
+        return standard_json(
+            success=False,
+            message=("Cannot delete category with assigned products. " "Please reassign or delete products first."),
             status_code=422,
         )
 
     # Soft-delete: mark as inactive
     category.is_active = False
     db.session.commit()
-    return standard_response(message="Category deactivated successfully")
+    return standard_json(message="Category deactivated successfully")
 
 
 # ---------------------------------------------------------------------------
@@ -214,47 +168,41 @@ def delete_category(category_id):
 #                PUT /api/v1/store/tax-config
 # ---------------------------------------------------------------------------
 
-@store_bp.route('/tax-config', methods=['GET'])
+
+@store_bp.route("/tax-config", methods=["GET"])
 @require_auth
 def get_tax_config():
-    categories = db.session.scalars(
-        select(Category).filter_by(store_id=g.current_user['store_id'])
-    ).all()
-    tax_data = [
-        {"category_id": c.category_id, "name": c.name, "gst_rate": float(c.gst_rate or 0)}
-        for c in categories
-    ]
-    return standard_response(data={"taxes": tax_data})
+    categories = db.session.scalars(select(Category).filter_by(store_id=g.current_user["store_id"])).all()
+    tax_data = [{"category_id": c.category_id, "name": c.name, "gst_rate": float(c.gst_rate or 0)} for c in categories]
+    return standard_json(data={"taxes": tax_data})
 
 
-@store_bp.route('/tax-config', methods=['PUT'])
+@store_bp.route("/tax-config", methods=["PUT"])
 @require_auth
-@require_role('owner')
+@require_role("owner")
 def update_tax_config():
     schema = TaxConfigSchema()
     try:
         data = schema.load(request.json or {})
     except ValidationError as err:
-        return standard_response(message="Validation error", status_code=400, errors=err.messages)
+        return standard_json(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    taxes = data.get('taxes', [])
-    store_id = g.current_user['store_id']
+    taxes = data.get("taxes", [])
+    store_id = g.current_user["store_id"]
     updates_made = 0
 
     for item in taxes:
         category = db.session.scalar(
             select(Category).filter_by(
-                category_id=item['category_id'],
+                category_id=item["category_id"],
                 store_id=store_id,
             )
         )
         if category:
-            category.gst_rate = item['gst_rate']
+            category.gst_rate = item["gst_rate"]
             updates_made += 1
 
     if updates_made > 0:
         db.session.commit()
 
-    return standard_response(
-        message=f"Updated GST rates for {updates_made} categories"
-    )
+    return standard_json(message=f"Updated GST rates for {updates_made} categories")

@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'retailiq-api'
+    metrics_path: '/metrics' # Assuming Flask-Prometheus-Exporter is added or will be added
+    static_configs:
+      - targets: ['retailiq-api.default.svc.cluster.local:80']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__meta_kubernetes_pod_label_region]
+        target_label: region
+
+  - job_name: 'retailiq-worker'
+    static_configs:
+      - targets: ['retailiq-worker.default.svc.cluster.local:8080'] # Assuming celery-exporter
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_region]
+        target_label: region

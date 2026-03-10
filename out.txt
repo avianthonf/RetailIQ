@@ -1,0 +1,10 @@
+ImportError while loading conftest 'D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ\tests\conftest.py'.
+tests\conftest.py:43: in <module>
+    from app.auth.utils import generate_access_token
+app\auth\__init__.py:5: in <module>
+    from . import routes
+app\auth\routes.py:9: in <module>
+    from ..utils.audit import audit_log
+app\utils\audit.py:6: in <module>
+    from app.models import AuditLog
+E   ImportError: cannot import name 'AuditLog' from 'app.models' (D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ\app\models\__init__.py)

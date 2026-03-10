@@ -19,7 +19,9 @@
 9. [AI Recommendations](#8-ai-recommendations)
 10. [Natural Language Query](#9-natural-language-query)
 11. [System](#10-system)
-12. [Error Codes Reference](#error-codes-reference)
+12. [Developer Platform (OAuth 2.0)](#11-developer-platform-oauth-20)
+13. [Webhooks](#12-webhooks)
+14. [Error Codes Reference](#error-codes-reference)
 
 ---
 
@@ -1347,6 +1349,79 @@ Simple ping endpoint (no auth required).
 
 ```json
 { "success": true }
+```
+
+---
+
+## 11. Developer Platform (OAuth 2.0)
+
+**Prefix**: `/oauth`
+
+RetailIQ supports OAuth 2.0 for third-party integrations.
+
+### POST `/oauth/token`
+
+Exchange client credentials or authorization codes for access tokens.
+
+**Grant Types**: `client_credentials`, `authorization_code`, `refresh_token`.
+
+**Body (Client Credentials)**:
+```json
+{
+  "grant_type": "client_credentials",
+  "client_id": "your_client_id",
+  "client_secret": "your_client_secret"
+}
+```
+
+**Response**:
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "...",
+  "scope": "read write"
+}
+```
+
+### GET `/api/v2/inventory`
+🔒 **OAuth Scope: `read`**
+Version 2 of the inventory API, specifically designed for third-party consumption.
+Requires `store_id` query parameter.
+
+---
+
+## 12. Webhooks
+
+**Prefix**: `/api/v1/developer/webhooks`
+
+Subscribe to real-time events from RetailIQ.
+
+### Event Types
+- `transaction.created`: Triggered when a new sale is completed.
+- `inventory.low_stock`: Triggered when stock falls below reorder level.
+
+### Security (Payload Signing)
+All webhook requests include an `X-RetailIQ-Signature` header, which is an HMAC-SHA256 hash of the JSON payload, using your application's `webhook_secret`.
+
+**Verification Example (Python)**:
+```python
+import hmac, hashlib
+signature = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
+```
+
+### Webhook Payload Shape
+```json
+{
+  "event": "transaction.created",
+  "timestamp": "2026-03-09T15:53:09Z",
+  "payload": {
+    "transaction_id": "...",
+    "total_amount": 1250.50,
+    "store_id": 1
+  }
+}
 ```
 
 ---

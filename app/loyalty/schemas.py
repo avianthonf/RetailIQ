@@ -8,9 +8,11 @@ class LoyaltyProgramUpsertSchema(Schema):
     expiry_days = fields.Int(validate=validate.Range(min=1))
     is_active = fields.Bool()
 
+
 class RedeemPointsSchema(Schema):
     points_to_redeem = fields.Float(required=True, validate=validate.Range(min=0.01))
     transaction_id = fields.UUID(allow_none=True, load_default=None)
+
 
 class RepayCreditSchema(Schema):
     amount = fields.Float(required=True, validate=validate.Range(min=0.01))

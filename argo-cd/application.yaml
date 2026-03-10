@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: retailiq-global
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dCoder-coder/RetailIQ.git
+    targetRevision: HEAD
+    path: k8s/overlays/us-east-1 # Using US-East as the primary/default for the global app
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

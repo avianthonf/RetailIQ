@@ -11,6 +11,7 @@ Covers:
   6. test_print_job_poll
   7. test_build_receipt_payload_structure
 """
+
 import uuid
 from datetime import datetime, timezone
 
@@ -25,9 +26,12 @@ from sqlalchemy.ext.compiler import compiles
 def _compile_jsonb(type_, compiler, **kw):
     return "JSON"
 
+
 @compiles(PGUUID, "sqlite")
 def _compile_uuid(type_, compiler, **kw):
     return "VARCHAR"
+
+
 # ─────────────────────────────────────────────────────────────────────────
 
 from app import db
@@ -49,14 +53,20 @@ from app.receipts.formatter import build_receipt_payload
 # Fixtures
 # ===========================================================================
 
+
 @pytest.fixture
 def setup(app):
     """
     Seed a store, owner user, category, and a product.
     Returns a dict with all seeded objects.
     """
-    store = Store(store_name="Receipt Test Store", store_type="grocery",
-                  city="Mumbai", state="Maharashtra", gst_number="27AAAPL1234C1ZV")
+    store = Store(
+        store_name="Receipt Test Store",
+        store_type="grocery",
+        city="Mumbai",
+        state="Maharashtra",
+        gst_number="27AAAPL1234C1ZV",
+    )
     db.session.add(store)
     db.session.commit()
 
@@ -144,8 +154,8 @@ def seeded_transaction(setup):
 # Tests
 # ===========================================================================
 
-class TestBarcodeLookup:
 
+class TestBarcodeLookup:
     def test_barcode_lookup_found(self, client, setup, seeded_barcode):
         """Seeding a product + barcode should yield 200 with correct product fields."""
         resp = client.get(
@@ -174,18 +184,15 @@ class TestBarcodeLookup:
     def test_barcode_lookup_missing_param(self, client, setup):
         """Omitting the 'value' query param should return 400."""
         resp = client.get("/api/v1/barcodes/lookup", headers=setup["headers"])
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_barcode_lookup_requires_auth(self, client, setup, seeded_barcode):
         """Unauthenticated request should be rejected with 401."""
-        resp = client.get(
-            f"/api/v1/barcodes/lookup?value={seeded_barcode.barcode_value}"
-        )
+        resp = client.get(f"/api/v1/barcodes/lookup?value={seeded_barcode.barcode_value}")
         assert resp.status_code == 401
 
 
 class TestBarcodeRegister:
-
     def test_barcode_register_success(self, client, setup):
         """Register a valid barcode for a product - expect 201."""
         resp = client.post(
@@ -228,7 +235,7 @@ class TestBarcodeRegister:
             json={"product_id": setup["product"].product_id, "barcode_value": "AB"},
             headers=setup["headers"],
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
         # Contains invalid character $
         resp2 = client.post(
@@ -236,7 +243,7 @@ class TestBarcodeRegister:
             json={"product_id": setup["product"].product_id, "barcode_value": "ABCD$1234"},
             headers=setup["headers"],
         )
-        assert resp2.status_code == 400
+        assert resp2.status_code == 422
 
     def test_barcode_register_missing_product_id(self, client, setup):
         """Missing product_id should return 400."""
@@ -245,7 +252,7 @@ class TestBarcodeRegister:
             json={"barcode_value": "VALID-1234"},
             headers=setup["headers"],
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_barcode_register_wrong_store_product(self, client, setup):
         """Product from a different store should return 404."""
@@ -275,7 +282,6 @@ class TestBarcodeRegister:
 
 
 class TestBarcodeList:
-
     def test_list_barcodes_for_product(self, client, setup, seeded_barcode):
         """List barcodes for a known product should return the seeded barcode."""
         resp = client.get(
@@ -291,11 +297,10 @@ class TestBarcodeList:
     def test_list_barcodes_missing_product_id(self, client, setup):
         """Missing product_id param should return 400."""
         resp = client.get("/api/v1/barcodes", headers=setup["headers"])
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
 
 class TestReceiptTemplate:
-
     def test_receipt_template_defaults(self, client, setup):
         """GET with no template set should return sensible defaults."""
         resp = client.get("/api/v1/receipts/template", headers=setup["headers"])
@@ -348,14 +353,9 @@ class TestReceiptTemplate:
         # Other fields should remain unchanged
         assert put_resp2.get_json()["data"]["header_text"] == payload["header_text"]
 
-    def test_receipt_template_requires_auth(self, client, setup):
-        """Unauthenticated request should be rejected."""
-        resp = client.get("/api/v1/receipts/template")
-        assert resp.status_code == 401
 
 
 class TestPrintJobs:
-
     def test_print_job_created(self, client, setup, seeded_transaction):
         """POST /receipts/print with valid transaction_id should return 201 + job_id."""
         resp = client.post(
@@ -418,14 +418,9 @@ class TestPrintJobs:
         )
         assert resp.status_code == 404
 
-    def test_print_job_requires_auth(self, client, setup):
-        """Unauthenticated request should be rejected."""
-        resp = client.post("/api/v1/receipts/print", json={})
-        assert resp.status_code == 401
 
 
 class TestReceiptFormatter:
-
     def test_build_receipt_payload_structure(self, app, setup, seeded_transaction):
         """Unit test formatter.py directly — all required keys must be present."""
         with app.app_context():

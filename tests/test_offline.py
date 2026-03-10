@@ -14,7 +14,9 @@ def mock_celery_task_session(monkeypatch):
     @contextmanager
     def mock_session(*args, **kwargs):
         yield db.session
-    monkeypatch.setattr('app.tasks.tasks.task_session', mock_session)
+
+    monkeypatch.setattr("app.tasks.tasks.task_session", mock_session)
+
 
 def test_snapshot_builder_structure(app, test_store):
     with app.app_context():
@@ -37,6 +39,7 @@ def test_snapshot_builder_structure(app, test_store):
         assert "this_week_revenue" in snapshot["kpis"]
         assert "this_month_revenue" in snapshot["kpis"]
 
+
 def test_snapshot_size_enforcement(app, test_store):
     with app.app_context():
         store_id = test_store.store_id
@@ -54,9 +57,9 @@ def test_snapshot_size_enforcement(app, test_store):
             dss = DailyStoreSummary(
                 store_id=store_id,
                 date=today - timedelta(days=i),
-                revenue=1000.55 * (i+1),
+                revenue=1000.55 * (i + 1),
                 profit=300.22,
-                transaction_count=50
+                transaction_count=50,
             )
             db.session.add(dss)
 
@@ -71,7 +74,7 @@ def test_snapshot_size_enforcement(app, test_store):
                 cost_price=10.0,
                 selling_price=20.0,
                 current_stock=2,
-                reorder_level=10
+                reorder_level=10,
             )
             db.session.add(p)
 
@@ -80,28 +83,32 @@ def test_snapshot_size_enforcement(app, test_store):
         snapshot = build_snapshot(store_id, db)
 
         serialized = json.dumps(snapshot)
-        assert len(serialized.encode('utf-8')) <= 51200 # 50 KB strict allowance
+        assert len(serialized.encode("utf-8")) <= 51200  # 50 KB strict allowance
+
 
 def test_snapshot_endpoint_returns_202_when_missing(client, owner_headers):
     # Get standard missing store without any snapshots
-    resp = client.get('/api/v1/offline/snapshot', headers=owner_headers)
+    resp = client.get("/api/v1/offline/snapshot", headers=owner_headers)
     assert resp.status_code == 202
-    assert resp.json['error']['message'] == "Snapshot is currently building"
+    assert resp.json["error"]["message"] == "Snapshot is currently building"
+
 
 def test_snapshot_endpoint_returns_200_after_task(app, client, owner_headers, test_store):
     # Run task
     with app.app_context():
         from app.tasks.tasks import build_analytics_snapshot
+
         build_analytics_snapshot(test_store.store_id)
 
     # hit API
-    resp = client.get('/api/v1/offline/snapshot', headers=owner_headers)
+    resp = client.get("/api/v1/offline/snapshot", headers=owner_headers)
     assert resp.status_code == 200
-    assert resp.json['success'] is True
-    assert 'built_at' in resp.json['data']
-    assert 'size_bytes' in resp.json['data']
-    assert 'snapshot' in resp.json['data']
-    assert 'kpis' in resp.json['data']['snapshot']
+    assert resp.json["success"] is True
+    assert "built_at" in resp.json["data"]
+    assert "size_bytes" in resp.json["data"]
+    assert "snapshot" in resp.json["data"]
+    assert "kpis" in resp.json["data"]["snapshot"]
+
 
 def test_snapshot_upsert_idempotent(app, test_store):
     with app.app_context():

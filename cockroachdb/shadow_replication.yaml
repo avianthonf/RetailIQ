@@ -1,0 +1,32 @@
+# CockroachDB Shadow Replication Configuration (Phase 1)
+# ---------------------------------------------------------------------------
+# Target: AWS RDS (PostgreSQL 15) -> CockroachDB Dedicated/Serverless
+# ---------------------------------------------------------------------------
+
+replication_stream:
+  source:
+    type: postgresql
+    version: "15"
+    cdc_mechanism: pgoutput
+    publication_name: retailiq_publication
+    slot_name: retailiq_replication_slot
+  
+  target:
+    type: cockroachdb
+    cluster_id: retailiq-global-cluster
+    database: retailiq
+    schema_mode: mirror # Mirror schema from Postgres initial load
+
+  parameters:
+    parallel_workers: 4
+    batch_size: 1000
+    shadow_mode: true # Continuous sync, but CockroachDB is not primary
+    consistency_check_interval: 3600 # Every hour
+
+validation:
+  scripts:
+    - path: scripts/db/validate_shadow_consitency.py
+      metrics:
+        - row_count_match
+        - checksum_sample_match
+        - latency_ms

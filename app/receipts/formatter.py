@@ -1,6 +1,7 @@
 """
 Receipt formatter — builds a structured receipt payload dict from a transaction.
 """
+
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -32,9 +33,7 @@ def build_receipt_payload(transaction_id, store_id, db_session) -> dict:
         ValueError: if transaction not found or store mismatch.
     """
     # --- 1. Fetch transaction ------------------------------------------------
-    txn = db_session.query(Transaction).filter_by(
-        transaction_id=transaction_id, store_id=store_id
-    ).first()
+    txn = db_session.query(Transaction).filter_by(transaction_id=transaction_id, store_id=store_id).first()
     if txn is None:
         raise ValueError(f"Transaction {transaction_id} not found for store {store_id}")
 
@@ -74,12 +73,14 @@ def build_receipt_payload(transaction_id, store_id, db_session) -> dict:
         subtotal += qty * unit_price
         discount_total += discount
 
-        items_out.append({
-            "name": prod.name,
-            "qty": qty,
-            "unit_price": round(unit_price, 2),
-            "line_total": round(line_total, 2),
-        })
+        items_out.append(
+            {
+                "name": prod.name,
+                "qty": qty,
+                "unit_price": round(unit_price, 2),
+                "line_total": round(line_total, 2),
+            }
+        )
 
     net = subtotal - discount_total
 
@@ -92,11 +93,7 @@ def build_receipt_payload(transaction_id, store_id, db_session) -> dict:
     grand_total = round(net, 2)
 
     # --- 7. Timestamp --------------------------------------------------------
-    timestamp = (
-        txn.created_at.isoformat()
-        if txn.created_at
-        else datetime.now(timezone.utc).isoformat()
-    )
+    timestamp = txn.created_at.isoformat() if txn.created_at else datetime.now(timezone.utc).isoformat()
 
     # --- 8. Assemble payload -------------------------------------------------
     payload: dict = {

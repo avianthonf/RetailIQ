@@ -3,6 +3,7 @@ Standalone SQLAlchemy session factory for Celery tasks.
 
 Tasks run outside a Flask request context.
 """
+
 import os
 from contextlib import contextmanager
 
@@ -16,10 +17,7 @@ _Session = None
 def _get_session_factory():
     global _engine, _Session
     if _Session is None:
-        db_url = os.environ.get(
-            'DATABASE_URL',
-            'postgresql://retailiq:retailiq@postgres:5432/retailiq'
-        )
+        db_url = os.environ.get("DATABASE_URL", "postgresql://retailiq:retailiq@postgres:5432/retailiq")
         kwargs = {"pool_pre_ping": True}
         if not db_url.startswith("sqlite"):
             kwargs["pool_size"] = 5

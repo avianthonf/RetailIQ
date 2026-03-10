@@ -1,0 +1,13 @@
+resources:
+  - ../../base
+namePrefix: us-east-
+commonLabels:
+  region: us-east-1
+patches:
+  - target:
+      kind: Deployment
+      name: retailiq-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 5 # Higher replicas for main region

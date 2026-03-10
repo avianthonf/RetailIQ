@@ -4,6 +4,7 @@ Comprehensive tests for the Pricing blueprint (engine + API routes + Celery task
 Uses the shared in-memory SQLite conftest fixtures (app, client, test_store, test_owner,
 owner_headers, test_product, test_category).
 """
+
 import contextlib
 import json
 from datetime import date, datetime, timedelta, timezone
@@ -26,18 +27,22 @@ from app.pricing.engine import generate_price_suggestions
 # Helper: mock Redis lock & task_session so Celery tasks run in-process
 # ────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(autouse=True)
 def mock_task_infra(monkeypatch):
     """Bypass Redis lock and Celery task-session in all pricing tests."""
+
     class _MockLock:
         def __init__(self, key, ttl=900):
             self.acquired = True
+
         def __enter__(self):
             return self.acquired
+
         def __exit__(self, *_):
             pass
 
-    monkeypatch.setattr('app.tasks.tasks._RedisLock', _MockLock)
+    monkeypatch.setattr("app.tasks.tasks._RedisLock", _MockLock)
 
     @contextlib.contextmanager
     def _mock_session(isolation_level=None):
@@ -48,16 +53,17 @@ def mock_task_infra(monkeypatch):
             db.session.rollback()
             raise
 
-    monkeypatch.setattr('app.tasks.tasks.task_session', _mock_session)
+    monkeypatch.setattr("app.tasks.tasks.task_session", _mock_session)
 
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────────────────
 
+
 def _seed_sku_history(store_id, product_id, n_days, units_per_day, avg_price):
     """Seed n_days of daily_sku_summary rows (most recent = today - 1)."""
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     for i in range(n_days, 0, -1):
         d = today - timedelta(days=i)
         row = DailySkuSummary(
@@ -75,7 +81,7 @@ def _seed_sku_history(store_id, product_id, n_days, units_per_day, avg_price):
 
 def _seed_store_summary(store_id, n_days, revenue_per_day=500.0):
     """Seed daily_store_summary so the anomaly check sees active store."""
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     for i in range(n_days, 0, -1):
         d = today - timedelta(days=i)
         row = DailyStoreSummary(
@@ -113,6 +119,7 @@ def _make_pending_suggestion(store_id, product_id, created_at=None):
 # 1. test_low_margin_raises_suggestion
 # ════════════════════════════════════════════════════════════════════════════
 
+
 def test_low_margin_raises_suggestion(app, test_store, test_category):
     """Product with 10% margin and inelastic demand should get a RAISE suggestion."""
     # margin = (selling - cost) / selling = (110 - 99) / 110 ≈ 10%
@@ -133,15 +140,19 @@ def test_low_margin_raises_suggestion(app, test_store, test_category):
     # To get elasticity_proxy > -0.3, we need corr(above_median_flag, units) > -0.3
     # Seeding constant units_sold=5 and constant price → corr is 0 (undefined → None)
     # Use a non-constant series: alternate high/low price with constant units
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     for i in range(35, 0, -1):
         d = today - timedelta(days=i)
         # Alternating price above/below median (110) but constant units → corr ≈ 0
         price = 115.0 if i % 2 == 0 else 105.0
         row = DailySkuSummary(
-            date=d, store_id=test_store.store_id, product_id=product.product_id,
-            units_sold=5.0, avg_selling_price=price,
-            revenue=5 * price, profit=5 * (price - 99),
+            date=d,
+            store_id=test_store.store_id,
+            product_id=product.product_id,
+            units_sold=5.0,
+            avg_selling_price=price,
+            revenue=5 * price,
+            profit=5 * (price - 99),
         )
         db.session.add(row)
     db.session.commit()
@@ -150,17 +161,16 @@ def test_low_margin_raises_suggestion(app, test_store, test_category):
 
     assert len(suggestions) >= 1
     raise_sg = next(
-        (s for s in suggestions
-         if s['product_id'] == product.product_id and s['suggestion_type'] == 'RAISE'),
-        None
+        (s for s in suggestions if s["product_id"] == product.product_id and s["suggestion_type"] == "RAISE"), None
     )
     assert raise_sg is not None, "Expected RAISE suggestion for low-margin product"
-    assert raise_sg['suggested_price'] > raise_sg['current_price']
+    assert raise_sg["suggested_price"] > raise_sg["current_price"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2. test_zero_velocity_with_high_margin_lowers_suggestion
 # ════════════════════════════════════════════════════════════════════════════
+
 
 def test_zero_velocity_with_high_margin_lowers_suggestion(app, test_store, test_category):
     """Product with 40% margin and 0 sales in last 14 days → LOWER suggestion."""
@@ -178,13 +188,17 @@ def test_zero_velocity_with_high_margin_lowers_suggestion(app, test_store, test_
     db.session.commit()
 
     # Seed 36 days of history: sales from 50 to 15 days ago, zero in last 14 days
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     for i in range(50, 14, -1):
         d = today - timedelta(days=i)
         row = DailySkuSummary(
-            date=d, store_id=test_store.store_id, product_id=product.product_id,
-            units_sold=3.0, avg_selling_price=200.0,
-            revenue=600.0, profit=240.0,
+            date=d,
+            store_id=test_store.store_id,
+            product_id=product.product_id,
+            units_sold=3.0,
+            avg_selling_price=200.0,
+            revenue=600.0,
+            profit=240.0,
         )
         db.session.add(row)
     # Last 14 days: zero sales (no rows → sum = 0)
@@ -196,24 +210,20 @@ def test_zero_velocity_with_high_margin_lowers_suggestion(app, test_store, test_
     suggestions = generate_price_suggestions(test_store.store_id, db.session)
 
     lower_sg = next(
-        (s for s in suggestions
-         if s['product_id'] == product.product_id and s['suggestion_type'] == 'LOWER'),
-        None
+        (s for s in suggestions if s["product_id"] == product.product_id and s["suggestion_type"] == "LOWER"), None
     )
     assert lower_sg is not None, "Expected LOWER suggestion for zero-velocity high-margin product"
-    assert lower_sg['suggested_price'] < lower_sg['current_price']
+    assert lower_sg["suggested_price"] < lower_sg["current_price"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # 3. test_apply_suggestion_updates_price
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_apply_suggestion_updates_price(app, client, test_store, test_owner,
-                                         test_product, owner_headers):
+
+def test_apply_suggestion_updates_price(app, client, test_store, test_owner, test_product, owner_headers):
     """Apply a suggestion: products.selling_price updated + price_history row created."""
-    suggestion = _make_pending_suggestion(
-        test_store.store_id, test_product.product_id
-    )
+    suggestion = _make_pending_suggestion(test_store.store_id, test_product.product_id)
 
     resp = client.post(
         f"/api/v1/pricing/suggestions/{suggestion.id}/apply",
@@ -226,15 +236,11 @@ def test_apply_suggestion_updates_price(app, client, test_store, test_owner,
 
     # Verify product price updated in DB
     db.session.expire_all()
-    product = db.session.query(Product).filter_by(
-        product_id=test_product.product_id
-    ).first()
+    product = db.session.query(Product).filter_by(product_id=test_product.product_id).first()
     assert float(product.selling_price) == 105.0
 
     # Verify price history row created
-    history = db.session.query(ProductPriceHistory).filter_by(
-        product_id=test_product.product_id
-    ).first()
+    history = db.session.query(ProductPriceHistory).filter_by(product_id=test_product.product_id).first()
     assert history is not None
     assert float(history.new_price) == 105.0
     assert history.store_id == test_store.store_id
@@ -244,12 +250,10 @@ def test_apply_suggestion_updates_price(app, client, test_store, test_owner,
 # 4. test_apply_suggestion_idempotent
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_apply_suggestion_idempotent(app, client, test_store, test_owner,
-                                      test_product, owner_headers):
+
+def test_apply_suggestion_idempotent(app, client, test_store, test_owner, test_product, owner_headers):
     """Applying an already-applied suggestion returns 409."""
-    suggestion = _make_pending_suggestion(
-        test_store.store_id, test_product.product_id
-    )
+    suggestion = _make_pending_suggestion(test_store.store_id, test_product.product_id)
 
     resp1 = client.post(
         f"/api/v1/pricing/suggestions/{suggestion.id}/apply",
@@ -270,12 +274,10 @@ def test_apply_suggestion_idempotent(app, client, test_store, test_owner,
 # 5. test_dismiss_suggestion
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_dismiss_suggestion(app, client, test_store, test_owner,
-                             test_product, owner_headers):
+
+def test_dismiss_suggestion(app, client, test_store, test_owner, test_product, owner_headers):
     """Dismissing a PENDING suggestion marks it DISMISSED."""
-    suggestion = _make_pending_suggestion(
-        test_store.store_id, test_product.product_id
-    )
+    suggestion = _make_pending_suggestion(test_store.store_id, test_product.product_id)
 
     resp = client.post(
         f"/api/v1/pricing/suggestions/{suggestion.id}/dismiss",
@@ -303,6 +305,7 @@ def test_dismiss_suggestion(app, client, test_store, test_owner,
 # 6. test_weekly_task_skips_recent_suggestion
 # ════════════════════════════════════════════════════════════════════════════
 
+
 def test_weekly_task_skips_recent_suggestion(app, test_store, test_category):
     """
     If a PENDING suggestion for a product exists from 3 days ago,
@@ -324,38 +327,37 @@ def test_weekly_task_skips_recent_suggestion(app, test_store, test_category):
     db.session.commit()
 
     # Seed 35 days for qualifying history
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     for i in range(35, 0, -1):
         d = today - timedelta(days=i)
         price = 115.0 if i % 2 == 0 else 105.0
         row = DailySkuSummary(
-            date=d, store_id=test_store.store_id, product_id=product.product_id,
-            units_sold=5.0, avg_selling_price=price,
-            revenue=5 * price, profit=5 * (price - 99),
+            date=d,
+            store_id=test_store.store_id,
+            product_id=product.product_id,
+            units_sold=5.0,
+            avg_selling_price=price,
+            revenue=5 * price,
+            profit=5 * (price - 99),
         )
         db.session.add(row)
     db.session.commit()
 
     # Pre-seed a PENDING suggestion from 3 days ago
     three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
-    _make_pending_suggestion(
-        test_store.store_id, product.product_id, created_at=three_days_ago
-    )
+    _make_pending_suggestion(test_store.store_id, product.product_id, created_at=three_days_ago)
 
-    count_before = db.session.query(PricingSuggestion).filter_by(
-        product_id=product.product_id, status="PENDING"
-    ).count()
+    count_before = (
+        db.session.query(PricingSuggestion).filter_by(product_id=product.product_id, status="PENDING").count()
+    )
 
     # Run the weekly task
     run_weekly_pricing_analysis()
 
-    count_after = db.session.query(PricingSuggestion).filter_by(
-        product_id=product.product_id, status="PENDING"
-    ).count()
+    count_after = db.session.query(PricingSuggestion).filter_by(product_id=product.product_id, status="PENDING").count()
 
     assert count_after == count_before, (
-        f"Weekly task should not have created a duplicate suggestion; "
-        f"before={count_before}, after={count_after}"
+        f"Weekly task should not have created a duplicate suggestion; " f"before={count_before}, after={count_after}"
     )
 
 
@@ -363,8 +365,8 @@ def test_weekly_task_skips_recent_suggestion(app, test_store, test_category):
 # 7. Additional API coverage: list suggestions + price history + rules
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_list_suggestions_returns_pending(app, client, test_store, test_owner,
-                                           test_product, owner_headers):
+
+def test_list_suggestions_returns_pending(app, client, test_store, test_owner, test_product, owner_headers):
     """GET /api/v1/pricing/suggestions returns PENDING suggestions for the store."""
     _make_pending_suggestion(test_store.store_id, test_product.product_id)
 
@@ -377,8 +379,7 @@ def test_list_suggestions_returns_pending(app, client, test_store, test_owner,
     assert "current_margin_pct" in items[0]
 
 
-def test_price_history_endpoint(app, client, test_store, test_owner,
-                                 test_product, owner_headers):
+def test_price_history_endpoint(app, client, test_store, test_owner, test_product, owner_headers):
     """GET /api/v1/pricing/history returns price history for a given product."""
     history = ProductPriceHistory(
         product_id=test_product.product_id,
