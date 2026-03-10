@@ -262,44 +262,58 @@ def main():
     ]
 
     print("def upgrade() -> None:")
-    print("    # --- 1. Add AuditMixin columns ---")
+    print("    bind = op.get_bind()")
+    print("    insp = sa.inspect(bind)")
+    print("    def has_col(table, col):")
+    print("        if not insp.has_table(table): return False")
+    print("        return any(c['name'] == col for c in insp.get_columns(table))")
+    
+    print("\n    # --- 1. Add AuditMixin columns ---")
     for t in audit_mix_tables:
-        print("    try:")
+        print(f'    if not has_col("{t}", "created_at"):')
         print(
             f'        op.add_column("{t}", sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.text("now()"), nullable=True))'
         )
+        print(f'    if not has_col("{t}", "updated_at"):')
         print(
             f'        op.add_column("{t}", sa.Column("updated_at", sa.TIMESTAMP(), server_default=sa.text("now()"), nullable=True))'
         )
-        print("    except Exception: pass")
 
     print("\n    # --- 1.5. Add other missing columns ---")
-    print("    try:")
+    print('    if not has_col("alerts", "product_name"):')
     print('        op.add_column("alerts", sa.Column("product_name", sa.String(), nullable=True))')
-    print("    except Exception: pass")
 
     print("\n    # --- 2. Create missing tables ---")
     for t in missing_tables:
         try:
-            print(gen_create_table(t))
+            print(f'    if not insp.has_table("{t}"):')
+            table_def = gen_create_table(t)
+            indented = "    " + table_def.replace("\\n", "\\n    ")
+            print(indented)
             print("")
         except KeyError:
             print(f"    # Table {t} not found in metadata")
 
     print("\ndef downgrade() -> None:")
-    print("    # --- Drop missing tables ---")
+    print("    bind = op.get_bind()")
+    print("    insp = sa.inspect(bind)")
+    print("    def has_col(table, col):")
+    print("        if not insp.has_table(table): return False")
+    print("        return any(c['name'] == col for c in insp.get_columns(table))")
+
+    print("\n    # --- Drop missing tables ---")
     for t in reversed(missing_tables):
-        print(f'    op.drop_table("{t}")')
+        print(f'    if insp.has_table("{t}"):')
+        print(f'        op.drop_table("{t}")')
 
     print("\n    # --- Remove AuditMixin columns ---")
-    print("    try:")
+    print('    if has_col("alerts", "product_name"):')
     print('        op.drop_column("alerts", "product_name")')
-    print("    except Exception: pass")
     for t in audit_mix_tables:
-        print("    try:")
+        print(f'    if has_col("{t}", "updated_at"):')
         print(f'        op.drop_column("{t}", "updated_at")')
+        print(f'    if has_col("{t}", "created_at"):')
         print(f'        op.drop_column("{t}", "created_at")')
-        print("    except Exception: pass")
 
 
 if __name__ == "__main__":
