@@ -267,7 +267,7 @@ def main():
     print("    def has_col(table, col):")
     print("        if not insp.has_table(table): return False")
     print("        return any(c['name'] == col for c in insp.get_columns(table))")
-    
+
     print("\n    # --- 1. Add AuditMixin columns ---")
     for t in audit_mix_tables:
         print(f'    if not has_col("{t}", "created_at"):')
