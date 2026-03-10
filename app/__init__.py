@@ -417,10 +417,9 @@ def create_app(config=None):
         return _check_health()
 
     from marshmallow import ValidationError
+    from werkzeug.exceptions import HTTPException
 
     from app.utils.responses import APIError, standard_json
-
-    from werkzeug.exceptions import HTTPException
 
     @app.errorhandler(APIError)
     def handle_api_error(err):
