@@ -794,10 +794,16 @@ Runs on every push and PR. Six parallel jobs:
 | Job | Purpose | Blocking? |
 |-----|---------|-----------|
 | 🔍 **Lint** | Ruff linter + format check | ✅ Yes |
-| 🛡️ **Security** | Bandit SAST scan + `pip-audit` CVE check | ⚠️ Advisory |
+| 🛡️ **Security** | Bandit SAST scan + `pip-audit` CVE check | ✅ Yes |
 | 🧪 **Test** | Full pytest suite with coverage (Distroless focus) | ✅ Yes |
 | 🐳 **Docker** | Multi-stage Distroless build validation | ✅ Yes |
 | 📦 **Migration Check** | Alembic migration detection | ✅ Yes |
+
+**Security Hardening (Mar 2026 Audit)**:
+- All core dependencies are pinned to secure versions (resolving CVEs in `flask-cors`, `scikit-learn`, `marshmallow`, `weasyprint`).
+- Hardened multi-stage Docker build ensures a minimal attack surface using Google's Distroless images.
+- CI includes mandatory `pip-audit` and `bandit` scans.
+- Explicit UTF-8 encoding enforcement across the codebase prevents parsing/logic errors.
 | ✅ **CI Pass** | Status gate for branch protection rules | ✅ Required |
 
 ### GitOps Deployment (`ArgoCD`)
