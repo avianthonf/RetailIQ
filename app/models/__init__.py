@@ -836,6 +836,47 @@ class RBACPermission(Base, AuditMixin):
 
 # ── Missing Models ────────────────────────────────────────────────────────────
 
+from .expansion_models import (
+    Country,
+    CountryTaxConfig,
+    CurrencyRate,
+    EInvoice,
+    KYCProvider,
+    KYCRecord,
+    PaymentProvider,
+    PaymentRecord,
+    StorePaymentMethod,
+    StoreTaxRegistration,
+    SupportedCurrency,
+    TaxTransaction,
+    Translation,
+    TranslationKey,
+)
+from .finance_models import (
+    FinancialAccount,
+    InsuranceClaim,
+    InsurancePolicy,
+    InsuranceProduct,
+    LedgerEntry,
+    LoanApplication,
+    LoanProduct,
+    LoanRepayment,
+    MerchantCreditProfile,
+    MerchantKYC,
+    PaymentTransaction,
+    TreasuryConfig,
+    TreasuryTransaction,
+)
+from .marketplace_models import (
+    RFQ,
+    CatalogItem,
+    MarketplacePOItem,
+    MarketplacePurchaseOrder,
+    ProcurementRecommendation,
+    RFQResponse,
+    SupplierProfile,
+    SupplierReview,
+)
 from .missing_models import (
     APIUsageRecord,
     DataSource,

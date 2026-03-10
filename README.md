@@ -84,9 +84,16 @@ RetailIQ is built as a Flask app using SQLAlchemy models and blueprint modules. 
 - **Operational APIs**: inventory, transactions, customers, store configuration.
 - **Analytics**: revenue/profit/category/payment/contribution views, mostly from aggregate tables.
 - **Suppliers & POs**: Track active suppliers, linked products, purchase orders, and goods receipts.
+
+### 📖 API Documentation
+
+The complete API reference is available in OpenAPI 3.0 format:
+- **Specification**: [`openapi.json`](file:///D:/Files/Desktop/RetailIQ-Final-Workspace/RetailIQ/openapi.json)
+
+This specification includes all v1 and v2 endpoints, request/response models, and authentication requirements.
 - **Forecasting**: forecast cache for store-level and SKU-level projections.
 - **Decision engine**: deterministic recommendations using rules over computed context.
-- **NLP endpoint**: deterministic intent routing + template-based responses (not generative).
+- **NLP endpoint**: deterministic intent router + template-based responses (not generative).
 - **Staff Performance**: Session management, daily target setting, and automated role-based metric aggregations. Exposed via unified POST/PUT `/targets` mapping.
 - **Loyalty & Credit**: Points-based loyalty programs, credit ledger, atomic loyalty accrual at transaction time, point redemption, credit sale enforcement, automated point expiry. Exposed via native endpoint aliases mapped perfectly for DataSage.
 - **GST Compliance**: HSN code management, GSTIN validation (modulo-36 checksum), per-transaction CGST/SGST recording, GSTR-1 JSON generation, and liability slab analytics.
@@ -1037,8 +1044,67 @@ RetailIQ now includes a suite of specialized audit prompts for brutal system rev
 
 ### 7. Core Engineering Principles
 - **Accuracy over Coverage**: 70% coverage with strict assertions is better than 100% with weak ones.
-- **Fail Fast**: The application refuses to start in production if critical secrets or configs are default/weak.
-- **Observability is Priority**: Every new service must include structured logging and health checks.
+- **Fail Fast**: The application ## Comprehensive System Architecture
+
+### Distributed Intelligence Infrastructure
+RetailIQ is engineered as a high-availability, multi-region platform designed to handle thousands of retail points-of-sale concurrently.
+
+#### Layered Architecture
+1.  **Ingress Layer**: AWS Global Accelerator and ALB provide low-latency entry points.
+2.  **Service Layer (Flask)**: Modular blueprints handle everything from Auth to Vision/AI.
+3.  **Application Logic**: Optimized Service Layer patterns separate business logic from routing.
+4.  **Async/Worker Layer**: Celery + Redis handles compute-heavy forecasting and batch aggregations.
+5.  **Data Layer**: CockroachDB (SQL) for transactional consistency and Redis for real-time caching.
+
+#### Specialized Subsystems
+-   **Forecasting Engine**: Uses Facebook Prophet + XGBoost for demand sensing.
+-   **Vision Pipeline**: Integrates YOLOv8 and Tesseract for shelf/invoice analytics.
+-   **Audit & Security**: Centralized Mixins provide deep traceability for every record.
+
+---
+
+## Comprehensive Developer and Engineer Guide
+
+### 🛠️ Core Engineering Standards
+-   **Type Safety**: Use `typing` and `Mapped` throughout the codebase.
+-   **RESTful Purity**: Ensure correct status codes (e.g., `422` for validation, `429` for rate limits).
+-   **Error Enveloping**: Wrap all responses in `standard_json`.
+-   **Asynchronous-First**: Offload any operation >200ms to Celery.
+
+### 📦 Development Workflow
+1.  **Environment Setup**:
+    ```bash
+    python -m venv .venv
+    pip install -r requirements.txt
+    ```
+2.  **Database Management**:
+    ```bash
+    alembic upgrade head  # Apply latest migrations
+    alembic check         # Verify schema alignment
+    ```
+3.  **Quality Control**:
+    ```bash
+    ruff format .         # Consistent styling
+    ruff check .          # Static analysis
+    pytest                # Full test suite execution
+    ```
+
+### 🧪 Testing Strategy
+-   **Unit Tests**: Located in `tests/`, using in-memory SQLite for speed.
+-   **Integration Tests**: Found in `tests/test_e2e.py`, simulating full business cycles.
+-   **Security Tests**: Auditing rate limiting, store scoping, and token privacy in `tests/test_security.py`.
+
+### 🚀 Production Deployment
+Deployments are automated via GitHub Actions `.github/workflows/deploy.yml`. The pipeline includes:
+-   **Security Gates**: Bandit and pip-audit scans.
+-   **Migration Parity**: `alembic check` to prevent schema drift.
+-   **Docker Optimization**: Distroless images with CPU-only PyTorch for efficiency.
+. Use docker-compose up --build or activate a virtualenv config.
+3. Refer to .env.example to build your local .env. Ensure that you generate strong JWT_PRIVATE_KEY and JWT_PUBLIC_KEY mock values.
+4. Database migrations run via Alembic (lembic upgrade head).
+
+### Contributing Guidelines
+All PRs require strict linting (Ruff), security audits (Bandit), and comprehensive Pytest pass rates. No undocumented endpoints will be merged. Use standard standard_json responses universally.
 
 ---
 
@@ -1051,19 +1117,3 @@ RetailIQ now includes a suite of specialized audit prompts for brutal system rev
 
 ## License
 This project is proprietary software for RetailIQ.
-
-
-## Comprehensive Developer and Engineer Guide
-
-### Architecture Overviews
-RetailIQ operates on a monolithic-first design extending into microservices seamlessly using Celery. For a full architectural breakdown see [System Overview](#system-overview).
-
-### Setting Up For Development
-1. Clone the repository.
-2. Use docker-compose up --build or activate a virtualenv config.
-3. Refer to .env.example to build your local .env. Ensure that you generate strong JWT_PRIVATE_KEY and JWT_PUBLIC_KEY mock values.
-4. Database migrations run via Alembic (lembic upgrade head).
-
-### Contributing Guidelines
-All PRs require strict linting (Ruff), security audits (Bandit), and comprehensive Pytest pass rates. No undocumented endpoints will be merged. Use standard standard_json responses universally.
-
