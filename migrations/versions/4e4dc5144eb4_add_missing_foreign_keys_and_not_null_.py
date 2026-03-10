@@ -41,7 +41,22 @@ def upgrade() -> None:
                         existing_server_default=sa.text("'true'"),
                     )
 
-    # 3. Foreign Keys
+    # 3. Unique Constraints
+    def has_uc(table_name, uc_name):
+        if not insp.has_table(table_name):
+            return True
+        for uc in insp.get_unique_constraints(table_name):
+            if uc["name"] == uc_name:
+                return True
+        return False
+
+    if not has_uc("forecast_cache", "uq_forecast_cache_store_product_date"):
+        with op.batch_alter_table("forecast_cache", schema=None) as batch_op:
+            batch_op.create_unique_constraint(
+                "uq_forecast_cache_store_product_date", ["store_id", "product_id", "forecast_date"]
+            )
+
+    # 4. Foreign Keys
     def has_fk(table_name, referred_table, constrained_column):
         if not insp.has_table(table_name):
             return True  # skip if no table
@@ -52,15 +67,15 @@ def upgrade() -> None:
 
     if not has_fk("product_price_history", "stores", "store_id"):
         with op.batch_alter_table("product_price_history", schema=None) as batch_op:
-            batch_op.create_foreign_key(None, "stores", ["store_id"], ["store_id"])
+            batch_op.create_foreign_key("fk_product_price_history_store_id", "stores", ["store_id"], ["store_id"])
 
     if not has_fk("products", "hsn_master", "hsn_code"):
         with op.batch_alter_table("products", schema=None) as batch_op:
-            batch_op.create_foreign_key(None, "hsn_master", ["hsn_code"], ["hsn_code"])
+            batch_op.create_foreign_key("fk_products_hsn_code", "hsn_master", ["hsn_code"], ["hsn_code"])
 
     if not has_fk("transactions", "staff_sessions", "session_id"):
         with op.batch_alter_table("transactions", schema=None) as batch_op:
-            batch_op.create_foreign_key(None, "staff_sessions", ["session_id"], ["id"])
+            batch_op.create_foreign_key("fk_transactions_session_id", "staff_sessions", ["session_id"], ["id"])
 
     if not has_fk("users", "stores", "store_id"):
         with op.batch_alter_table("users", schema=None) as batch_op:

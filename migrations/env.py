@@ -131,12 +131,18 @@ def run_migrations_online() -> None:
 
             Operations.invoke = patched_invoke
 
+        def include_object(object, name, type_, reflected, compare_to):
+            if type_ == "index":
+                return False
+            return True
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             render_as_batch=True if connection.dialect.name == "sqlite" else False,
             compare_type=False if connection.dialect.name == "sqlite" else True,
             compare_server_default=False if connection.dialect.name == "sqlite" else True,
+            include_object=include_object if connection.dialect.name == "sqlite" else None,
         )
 
         with context.begin_transaction():
