@@ -13,6 +13,10 @@ services:
       - pip-cache:/root/.cache/pip
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://retailiq:retailiq@postgres:5432/retailiq
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,12 +58,16 @@ services:
       - pip-cache:/root/.cache/pip
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://retailiq:retailiq@postgres:5432/retailiq
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
-    command: celery -A celery_worker.celery_app worker -l info --uid nobody --gid nogroup
+    command: celery -A celery_worker.celery_app worker -l info
 
   beat:
     build:
@@ -73,12 +81,16 @@ services:
       - pip-cache:/root/.cache/pip
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://retailiq:retailiq@postgres:5432/retailiq
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
-    command: celery -A celery_worker.celery_app beat -l info --uid nobody --gid nogroup --schedule /tmp/celerybeat-schedule
+    command: celery -A celery_worker.celery_app beat -l info --schedule /tmp/celerybeat-schedule
 
 volumes:
   postgres_data:

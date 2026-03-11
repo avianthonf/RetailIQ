@@ -731,6 +731,7 @@ Common variables:
 - In non-test environments, provide stable JWT keys (do not rely on ephemeral generated keys).
 - For production, use a secret manager and avoid committing real secrets.
 - `MAIL_USERNAME` and `MAIL_PASSWORD` are optional in development (emails fall back to console output). In production, they are stored in AWS Secrets Manager (`retailiq/prod/mail-username`, `retailiq/prod/mail-password`).
+- Docker Compose overrides (e.g., forcing `DATABASE_URL=postgres://retailiq:retailiq@postgres:5432/retailiq`) live only inside `docker-compose.yml`. AWS Fargate/ECS tasks continue to receive their env vars from the task definition/Secrets Manager, so these local-only tweaks do **not** impact the deployed workload.
 
 ---
 
@@ -746,6 +747,8 @@ Services:
 - API on `http://localhost:5000`
 - PostgreSQL on `localhost:5432`
 - Redis on `localhost:6379`
+
+> **Important:** When running via Docker Compose, leave `DATABASE_URL` (and `REDIS_URL`) pointing to the internal service hostnames (`postgres`, `redis`) as shown in `.env.example`. Overriding them to `localhost` in `.env` works only for a host-run Flask server; inside containers `localhost` refers to the container itself, so `scripts/wait_for_db.py` will never reach the Postgres container and you will see repeated `psycopg2.OperationalError ... connection refused` messages.
 
 ## Option B: Local Python runtime
 
@@ -821,6 +824,7 @@ Multi-step user journey tests that span multiple endpoints and simulate Celery t
 - **Error Handling**: Use the `HTTPException` handler in `app/__init__.py`. Return `429` for rate limits, `422` for validation errors, and `500` only for truly unhandled exceptions.
 - **Migration Workflow**: All schema changes MUST be accompanied by a manual or auto-generated Alembic migration. Run `alembic check` locally to ensure no missing fields are detected.
 - **Docker Build**: Optimized for CI speed using `--extra-index-url https://download.pytorch.org/whl/cpu`.
+- **Celery Reliability**: The app now forces `broker_connection_retry_on_startup=True` so Docker Compose and ECS workers auto-retry Redis connections on boot. Leave Compose commands without `--uid/--gid`; containers run as the non-root `app` user already.
 
 ### Data Modeling & Migrations
 - **Models**: Core models live in `app/models/__init__.py`. External or secondary models should be integrated via `missing_models.py` or separate files but MUST be imported in the main models init to be detected by Alembic.
@@ -901,6 +905,10 @@ You can import `openapi.json` into tools like **Postman**, **Insomnia**, or **Sw
 ## 🏗️ Comprehensive System Architecture
 
 RetailIQ is designed as a **Planet-Scale Modular Monolith**, strategically built to transition towards a globally distributed, high-performance architecture. OpenAPI generation scripts (`extract_routes.py` and `build_openapi.py`) automate API schemas directly from Flask blueprints.
+
+### Local Orchestration Layer
+- **Docker Compose Mesh**: Local developers run the full stack (`app`, `worker`, `beat`, `postgres`, `redis`) inside a shared bridge network. Compose now forces internal DNS hostnames (`postgres`, `redis`) for `DATABASE_URL`/`REDIS_URL`, preventing `localhost` leaks that previously caused startup failures. Celery containers rely on the baked-in non-root `app` user, so no extra `--uid/--gid` flags are needed.
+- **Resilient Bootstrapping**: Celery configuration enforces `broker_connection_retry_on_startup=True`, matching ECS production behavior so dev clusters auto-retry Redis during boot storms or while Docker brings up dependencies.
 
 ### Architectural Tiers
 

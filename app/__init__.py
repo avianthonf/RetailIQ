@@ -296,6 +296,9 @@ def create_app(config=None):
         "task_eager_propagates": bool(
             app.config.get("task_eager_propagates", app.config.get("CELERY_EAGER_PROPAGATES_EXCEPTIONS", True))
         ),
+        # Celery 5.x warns that broker_connection_retry_on_startup will default to False in 6.0.
+        # Force it on so compose logs stay clean and ECS workers auto-retry Redis outages on boot.
+        "broker_connection_retry_on_startup": True,
     }
     celery_app.conf.update(celery_conf)
     celery_app.conf.update(app.config)
