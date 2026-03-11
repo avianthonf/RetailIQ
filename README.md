@@ -783,15 +783,25 @@ pytest -q
 - Uses in-memory SQLite with shared `StaticPool` for fast isolated tests.
 - Compilers map PG-specific `JSONB`/`UUID` for SQLite compatibility.
 - Test fixture injects ephemeral JWT keys.
-- `db_session` fixture now creates a dedicated SQLAlchemy `sessionmaker` per test, binding it to a fresh transaction so parallelized tests no longer clash on the global scoped session (prevents `InvalidRequestError`).
+- `PRAGMA foreign_keys = ON` is enabled at app fixture startup for consistent FK enforcement across all tests.
+- `db_session` yields the global `_db.session` (same object route handlers use) so fixtures and HTTP calls share one transaction context.
+- An autouse `_clean_tables` fixture deletes all rows from every table after each test (`DELETE` with FK checks disabled), providing complete isolation.
+- Tests that need FK parent records (e.g., `Developer` for `DeveloperApplication`, `Country` for `EInvoice`, `LoanProduct` for `LoanApplication`) must seed them explicitly — hardcoded IDs like `store_id=1` will fail because auto-increment does not reset with `DELETE`.
+
+### Parallel Execution
+Tests run in parallel using `pytest-xdist`. Each worker gets its own process with a separate in-memory SQLite database, providing natural isolation.
+```bash
+pytest tests/ -n auto          # auto-detect CPU cores
+pytest tests/ -n 6             # explicit 6 workers (~4:40 on Ryzen 5 3600X)
+pytest tests/ -n 1             # sequential (for debugging)
+```
 
 ### Recommended test commands
 ```bash
-pytest -q
-pytest -q tests/test_transactions.py tests/test_audit.py tests/test_auth_flow.py
-pytest tests/test_email_service.py -v  # email/OTP integration tests
-pytest tests/test_security.py -v       # security hardening tests
-pytest tests/test_e2e.py -v            # end-to-end integration tests
+pytest tests/ -n auto -q                    # full suite, parallel
+pytest tests/test_transactions.py -v        # single module
+pytest tests/test_e2e.py -v                 # end-to-end integration tests
+pytest tests/test_security.py -v            # security hardening tests
 ```
 
 ### Security Tests (`tests/test_security.py`)
