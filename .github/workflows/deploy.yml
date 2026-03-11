@@ -206,7 +206,7 @@ jobs:
           service: ${{ secrets[matrix.service.service_secret] }}
           cluster: ${{ secrets.ECS_CLUSTER }}
           wait-for-service-stability: true
-          wait-for-minutes: 10
+          wait-for-minutes: 15
 
   # ──────────────────────────────────────────────────────────────────────────
   # 4. POST-DEPLOY — health verification + notification

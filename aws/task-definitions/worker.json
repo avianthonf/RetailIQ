@@ -32,11 +32,11 @@
     },
     "essential": true,
     "healthCheck": {
-      "command": ["CMD-SHELL", "echo healthy"],
-      "interval": 30,
-      "timeout": 5,
-      "retries": 3,
-      "startPeriod": 60
+      "command": ["CMD-SHELL", "python3 -c \"import sys; sys.exit(0);\""],
+      "interval": 60,
+      "timeout": 30,
+      "retries": 5,
+      "startPeriod": 120
     }
   }]
 }
