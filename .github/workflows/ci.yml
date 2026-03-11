@@ -43,6 +43,7 @@ jobs:
   check:
     name: 🔍 Quality Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
 
@@ -55,7 +56,6 @@ jobs:
       - name: Install tools
         run: |
           uv pip install --system ruff==0.4.4 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
-          uv pip install --system -r requirements.txt  # For migration check
 
       - name: Ruff check (lint)
         run: ruff check . --output-format=github
@@ -103,6 +103,7 @@ jobs:
   test:
     name: 🧪 Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     strategy:
       fail-fast: false
       matrix:
@@ -138,7 +139,8 @@ jobs:
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov-report=html:htmlcov \
-            --junitxml=results.xml
+            --junitxml=results.xml \
+            --maxfail=10  # Stop after 10 failures
 
       - name: Upload test results
         if: always()
@@ -170,6 +172,7 @@ jobs:
   docker:
     name: 🐳 Docker Build
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     needs: [check]
     if: github.ref == 'refs/heads/main'  # Only run on main branch
     steps:
@@ -196,6 +199,7 @@ jobs:
     if: always()
     needs: [check, test, docker]
     runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
       - name: Check job results
         run: |
