@@ -54,8 +54,8 @@ jobs:
 
       - name: Install tools
         run: |
-          uv pip install ruff==0.4.4 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
-          uv pip install -r requirements.txt  # For migration check
+          uv pip install --system ruff==0.4.4 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
+          uv pip install --system -r requirements.txt  # For migration check
 
       - name: Ruff check (lint)
         run: ruff check . --output-format=github
