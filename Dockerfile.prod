@@ -60,14 +60,16 @@ LABEL org.opencontainers.image.title="RetailIQ API" \
 # Python tuning
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app:/usr/local/lib/python3.10/site-packages
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 # Copy site-packages and binaries from installer
 COPY --from=installer /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=installer /usr/local/bin /usr/local/bin
+
+# Ensure Python can find installed packages
+ENV PYTHONPATH=/app:/usr/local/lib/python3.10/site-packages
 
 # Copy system libraries needed by C extensions (psycopg2, cairo, etc.)
 # Note: In Debian, some base libraries reside in /lib/x86_64-linux-gnu
