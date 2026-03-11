@@ -113,6 +113,7 @@ def client(app):
 # Database transaction fixture for test isolation
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="function")
 def db_session(app):
     """Create a new database session with a fresh transaction for each test."""
