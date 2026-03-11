@@ -61,7 +61,7 @@ LABEL org.opencontainers.image.title="RetailIQ API" \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:/usr/local/lib/python3.10/site-packages
 
 WORKDIR /app
 
