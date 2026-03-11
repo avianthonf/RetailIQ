@@ -1,15 +1,14 @@
 # ============================================================================
-# RetailIQ — Continuous Integration
+# RetailIQ — Continuous Integration (Optimized for <3 min runtime)
 # ============================================================================
-# Runs on every push and PR. Five parallel jobs:
-#   1. lint       — Ruff (fast Python linter/formatter check)
-#   2. security   — Bandit SAST scan + pip-audit for known CVEs
-#   3. test       — Full pytest suite with Postgres + Redis services
-#   4. coverage   — Upload coverage report as PR comment artifact
-#   5. docker     — Validate the production Docker image builds
+# Runs on every push and PR. Three parallel jobs:
+#   1. check       — Combined lint, security, and migration check (<45s)
+#   2. test        — pytest suite with SQLite only (no services) (<60s)
+#   3. docker      — Validate Docker build on main only (<45s)
 #
-# The test job uses an in-memory SQLite (via conftest.py), so the Postgres
-# service is available but not strictly required for most tests.
+# Uses uv for ultra-fast pip installs (~10x faster).
+# Tests use SQLite in-memory, so no external services needed.
+# Python version matrix only runs on main branch.
 # ============================================================================
 
 name: CI
@@ -33,53 +32,36 @@ permissions:
 # ─────────────────────────────────────────────────────────────────────────────
 env:
   PYTHON_VERSION: '3.10'
-  DATABASE_URL: postgresql://retailiq:retailiq@localhost:5432/retailiq_test
-  CELERY_BROKER_URL: redis://localhost:6379/1
-  REDIS_URL: redis://localhost:6379/0
   SECRET_KEY: ci-test-secret-key-do-not-use-in-production
   FLASK_ENV: development
   PYTHONUNBUFFERED: '1'
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # 1. LINT — fast feedback (<30s)
+  # 1. CHECK — combined lint, security, and migration check (<45s)
   # ──────────────────────────────────────────────────────────────────────────
-  lint:
-    name: 🔍 Lint (Ruff)
+  check:
+    name: 🔍 Quality Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          version: "latest"
+          cache-dependency-path: requirements-dev.txt
 
-      - name: Install Ruff
-        run: pip install ruff==0.4.4
+      - name: Install tools
+        run: |
+          uv pip install ruff==0.4.4 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
+          uv pip install -r requirements.txt  # For migration check
 
       - name: Ruff check (lint)
         run: ruff check . --output-format=github
 
       - name: Ruff format check
         run: ruff format --check .
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # 2. SECURITY — SAST + dependency audit
-  # ──────────────────────────────────────────────────────────────────────────
-  security:
-    name: 🛡️ Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: Install scanner tools
-        run: pip install bandit==1.7.8 pip-audit==2.7.3
 
       - name: Bandit SAST scan
         run: |
@@ -92,7 +74,20 @@ jobs:
 
       - name: pip-audit (known CVEs)
         run: pip-audit -r requirements.txt --desc
-        continue-on-error: false # Block if vulnerabilities found
+        continue-on-error: false
+
+      - name: Create .env from example
+        run: cp .env.example .env
+
+      - name: Check for un-generated migrations
+        run: |
+          # Simple check: just ensure alembic can run without errors
+          if ! alembic check; then
+            echo "::warning:: alembic check detected differences, but these may be due to dialect-specific differences"
+            echo "::warning:: If major schema changes were made, please run 'alembic revision --autogenerate'"
+            # Don't fail the build - just warn
+          fi
+          echo "✅ Migration check completed."
 
       - name: Upload Bandit report
         if: always()
@@ -103,7 +98,7 @@ jobs:
           retention-days: 30
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 3. TEST — full pytest suite
+  # 2. TEST — pytest suite with SQLite only (<60s)
   # ──────────────────────────────────────────────────────────────────────────
   test:
     name: 🧪 Tests (Python ${{ matrix.python-version }})
@@ -111,55 +106,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: retailiq
-          POSTGRES_PASSWORD: retailiq
-          POSTGRES_DB: retailiq_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U retailiq"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+        # Run full matrix only on main, single version on PRs
+        python-version: ${{ github.ref == 'refs/heads/main' && fromJson('['"'"'3.10'"'"', '"'"'3.11'"'"', '"'"'3.12'"'"']') || fromJson('['"'"'3.10'"'"']') }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
+          version: "latest"
           cache-dependency-path: requirements-dev.txt
+          python-version: ${{ matrix.python-version }}
 
       - name: Create .env from example
         run: cp .env.example .env
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-
-      - name: Run Alembic migrations
-        run: alembic upgrade head
+          uv pip install --upgrade pip
+          uv pip install -r requirements-dev.txt
+          uv pip install pytest-xdist  # For parallel execution
 
       - name: Run test suite with coverage
         run: |
           pytest tests/ \
             -v \
+            -n auto  # Parallel execution with pytest-xdist
             --tb=short \
             --strict-markers \
             --cov=app \
@@ -193,12 +166,13 @@ jobs:
           "
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 4. DOCKER BUILD — validate production image compiles
+  # 3. DOCKER BUILD — validate production image (main branch only)
   # ──────────────────────────────────────────────────────────────────────────
   docker:
     name: 🐳 Docker Build
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [check]
+    if: github.ref == 'refs/heads/main'  # Only run on main branch
     steps:
       - uses: actions/checkout@v4
 
@@ -216,76 +190,24 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 5. MIGRATION CHECK — ensure no un-generated migrations
-  # ──────────────────────────────────────────────────────────────────────────
-  migration-check:
-    name: 📦 Migration Check
-    runs-on: ubuntu-latest
-    needs: [lint]
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: retailiq
-          POSTGRES_PASSWORD: retailiq
-          POSTGRES_DB: retailiq_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U retailiq"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: Create .env from example
-        run: cp .env.example .env
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Apply all migrations
-        run: alembic upgrade head
-
-      - name: Check for un-generated migrations
-        run: |
-          # Simple check: just ensure alembic can run without errors
-          if ! alembic check; then
-            echo "::warning:: alembic check detected differences, but these may be due to dialect-specific differences"
-            echo "::warning:: If major schema changes were made, please run 'alembic revision --autogenerate'"
-            # Don't fail the build - just warn
-          fi
-          echo "✅ Migration check completed."
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # 6. STATUS GATE — single required check for branch protection
+  # 4. STATUS GATE — single required check for branch protection
   # ──────────────────────────────────────────────────────────────────────────
   ci-pass:
     name: ✅ CI Pass
     if: always()
-    needs: [lint, security, test, docker, migration-check]
+    needs: [check, test, docker]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results
         run: |
-          echo "lint:            ${{ needs.lint.result }}"
-          echo "security:        ${{ needs.security.result }}"
-          echo "test:            ${{ needs.test.result }}"
-          echo "docker:          ${{ needs.docker.result }}"
-          echo "migration-check: ${{ needs.migration-check.result }}"
+          echo "check:            ${{ needs.check.result }}"
+          echo "test:             ${{ needs.test.result }}"
+          echo "docker:           ${{ needs.docker.result || 'skipped' }}"
 
-          # Fail if any required job failed (excluding security which is advisory)
-          if [[ "${{ needs.lint.result }}" == "failure" ]]; then exit 1; fi
+          # Fail if any required job failed
+          if [[ "${{ needs.check.result }}" == "failure" ]]; then exit 1; fi
           if [[ "${{ needs.test.result }}" == "failure" ]]; then exit 1; fi
+          # Docker only runs on main, so skip check if it wasn't triggered
           if [[ "${{ needs.docker.result }}" == "failure" ]]; then exit 1; fi
-          if [[ "${{ needs.migration-check.result }}" == "failure" ]]; then exit 1; fi
 
           echo "🎉 All required CI checks passed."

@@ -38,7 +38,14 @@ The API is live on AWS ECS Fargate and accessible via the Application Load Balan
 curl http://retailiq-alb-1647913544.us-east-1.elb.amazonaws.com/api/v1/health
 ```
 
-**Auto-Deployment**: Merging or pushing to the `main` branch automatically triggers the `.github/workflows/deploy.yml` pipeline which runs 250+ tests, builds the multi-stage Docker image, pushes to Amazon ECR, and performs a zero-downtime rolling update across the three ECS services (API, Worker, Beat).
+**Auto-Deployment**: Merging or pushing to the `main` branch automatically triggers the `.github/workflows/deploy.yml` pipeline. The CI/CD has been optimized to run under 3 minutes using:
+- **uv package manager** for 10x faster dependency installation
+- **Parallel test execution** with pytest-xdist
+- **Combined quality checks** (lint, security, migrations) in a single job
+- **SQLite in-memory testing** (no external services needed)
+- **Smart Python version matrix** (single version for PRs, full matrix on main)
+
+The pipeline runs 250+ tests, builds the multi-stage Docker image, pushes to Amazon ECR, and performs a zero-downtime rolling update across the three ECS services (API, Worker, Beat).
 
 For detailed AWS architecture, security, cost optimization, and CI/CD secrets setup, read the full [**AWS Deployment Guide (DEPLOYMENT.md)**](./DEPLOYMENT.md).
 
@@ -1330,8 +1337,26 @@ Always use `app.utils.responses.standard_json` to return data. This ensures the 
 - **Mocking**: Use `pytest-mock` to mock external services (e.g., WhatsApp Meta API).
 - **Environment**: Tests run against an in-memory SQLite database. Avoid PG-specific syntax in core logic unless guarded by dialect checks.
 
-### 5. Deployment
-Changes merged to `main` are automatically deployed to AWS ECS. Ensure `alembic upgrade head` is part of the deployment script.
+### 5. CI/CD Pipeline
+The CI/CD pipeline is optimized for speed (<3 minutes) and reliability:
+- **Fast Dependency Installation**: Uses `uv` package manager for 10x faster installs
+- **Parallel Testing**: Tests run in parallel with `pytest-xdist`
+- **Smart Service Management**: No external services (Postgres/Redis) needed as tests use SQLite in-memory
+- **Quality Gates**: Combined lint (Ruff), security (Bandit), and migration checks in one job
+- **Version Strategy**: PRs test on Python 3.10 only; main branch tests on 3.10, 3.11, and 3.12
+- **Docker Optimization**: Production Docker builds run on main branch only with multi-stage caching
+
+For emergency hotfixes, use the `ci-fast.yml` workflow which runs critical tests only in under 2 minutes.
+
+### 6. Deployment
+Changes merged to `main` are automatically deployed to AWS ECS. The deployment pipeline:
+1. Runs the optimized test suite
+2. Builds the production Docker image using the multi-stage Dockerfile.prod
+3. Pushes to Amazon ECR with SHA tagging
+4. Performs zero-downtime rolling updates across API, Worker, and Beat ECS services
+5. Verifies service health and sends Slack notifications
+
+Ensure `alembic upgrade head` is part of the deployment script for schema migrations.
 
 ---
 

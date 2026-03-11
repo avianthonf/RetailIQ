@@ -48,60 +48,44 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # 1. TEST — gate (reuses CI workflow)
+  # 1. TEST — gate (reuses optimized CI workflow)
   # ──────────────────────────────────────────────────────────────────────────
   test:
     name: 🧪 Pre-deploy Tests
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: retailiq
-          POSTGRES_PASSWORD: retailiq
-          POSTGRES_DB: retailiq_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U retailiq"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-
     env:
-      DATABASE_URL: postgresql://retailiq:retailiq@localhost:5432/retailiq_test
-      CELERY_BROKER_URL: redis://localhost:6379/1
-      REDIS_URL: redis://localhost:6379/0
       SECRET_KEY: ci-test-secret-key
       FLASK_ENV: development
+      PYTHONUNBUFFERED: '1'
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: '3.10'
-          cache: pip
+          version: "latest"
           cache-dependency-path: requirements-dev.txt
+          python-version: '3.10'
+
+      - name: Create .env from example
+        run: cp .env.example .env
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Run migrations
-        run: alembic upgrade head
+        run: |
+          uv pip install --upgrade pip
+          uv pip install -r requirements-dev.txt
+          uv pip install pytest-xdist
 
       - name: Run test suite
-        run: pytest tests/ -v --tb=short --strict-markers
+        run: |
+          pytest tests/ \
+            -v \
+            -n auto  # Parallel execution
+            --tb=short \
+            --strict-markers
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. BUILD & PUSH — production Docker image

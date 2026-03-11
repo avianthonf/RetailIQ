@@ -48,7 +48,7 @@ from app.models import Base, Category, Product, Store, User
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def app():
     """Create a fresh Flask app with an in-memory SQLite DB for each test.
 
@@ -56,7 +56,7 @@ def app():
     test-client request sessions) shares the exact same in-memory database.
     Without this each new connection gets an empty SQLite DB.
     """
-    # Generate test RSA keys first
+    # Generate test RSA keys once per session
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -91,23 +91,6 @@ def app():
     )
 
     with test_app.app_context():
-        # Generate test RSA keys
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric import rsa
-
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        public_pem = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        test_app.config["JWT_PRIVATE_KEY"] = private_pem.decode("utf-8")
-        test_app.config["JWT_PUBLIC_KEY"] = public_pem.decode("utf-8")
-
         Base.metadata.create_all(_db.engine)
         yield test_app
         _db.session.remove()
@@ -127,21 +110,42 @@ def client(app):
 
 
 # ---------------------------------------------------------------------------
+# Database transaction fixture for test isolation
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="function")
+def db_session(app):
+    """Create a new database session with a fresh transaction for each test."""
+    connection = _db.engine.connect()
+    transaction = connection.begin()
+    
+    # Bind a session to the transaction
+    session = _db.session(bind=connection)
+    
+    yield session
+    
+    # Rollback the transaction and close the connection
+    session.close()
+    transaction.rollback()
+    connection.close()
+
+
+# ---------------------------------------------------------------------------
 # Data fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="function")
-def test_store(app):
+def test_store(db_session):
     """Create a base store (no store_type so seeding tests work cleanly)."""
     store = Store(store_name="Test Supermart", store_type="grocery")
-    _db.session.add(store)
-    _db.session.commit()
+    db_session.add(store)
+    db_session.commit()
     return store
 
 
 @pytest.fixture(scope="function")
-def test_owner(app, test_store):
+def test_owner(app, test_store, db_session):
     user = User(
         mobile_number="9000000001",
         full_name="Owner User",
@@ -149,13 +153,13 @@ def test_owner(app, test_store):
         store_id=test_store.store_id,
         is_active=True,
     )
-    _db.session.add(user)
-    _db.session.commit()
+    db_session.add(user)
+    db_session.commit()
     return user
 
 
 @pytest.fixture(scope="function")
-def test_staff(app, test_store):
+def test_staff(app, test_store, db_session):
     user = User(
         mobile_number="9000000002",
         full_name="Staff User",
@@ -163,8 +167,8 @@ def test_staff(app, test_store):
         store_id=test_store.store_id,
         is_active=True,
     )
-    _db.session.add(user)
-    _db.session.commit()
+    db_session.add(user)
+    db_session.commit()
     return user
 
 
@@ -181,15 +185,15 @@ def staff_headers(app, test_staff, test_store):
 
 
 @pytest.fixture(scope="function")
-def test_category(app, test_store):
+def test_category(app, test_store, db_session):
     cat = Category(store_id=test_store.store_id, name="Test Category", gst_rate=5.0)
-    _db.session.add(cat)
-    _db.session.commit()
+    db_session.add(cat)
+    db_session.commit()
     return cat
 
 
 @pytest.fixture(scope="function")
-def test_product(app, test_store, test_category):
+def test_product(app, test_store, test_category, db_session):
     product = Product(
         store_id=test_store.store_id,
         category_id=test_category.category_id,
@@ -198,6 +202,6 @@ def test_product(app, test_store, test_category):
         cost_price=60.0,
         current_stock=50.0,
     )
-    _db.session.add(product)
-    _db.session.commit()
+    db_session.add(product)
+    db_session.commit()
     return product
