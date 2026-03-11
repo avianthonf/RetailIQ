@@ -94,4 +94,4 @@ EXPOSE 5000
 
 # Distroless entrypoint
 ENTRYPOINT ["/usr/bin/python3"]
-CMD ["-m", "gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]
+CMD ["-c", "import sys; sys.path.insert(0, '/usr/local/lib/python3.10/site-packages'); from gunicorn.app.wsgiapp import run; run()", "-c", "gunicorn.conf.py", "wsgi:app"]
