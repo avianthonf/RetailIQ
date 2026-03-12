@@ -1,16 +1,9 @@
-# ============================================================================
-# RetailIQ — Production Dockerfile (Multi-Stage)
-# Target: AWS ECS Fargate / any managed container platform
-# ============================================================================
+# RetailIQ — Production Dockerfile
+FROM python:3.10-slim-bullseye
 
-# ---------------------------------------------------------------------------
-# Stage 1: Builder — compile wheels for all Python dependencies
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Stage 1: Builder — compile wheels for all Python dependencies
-# ---------------------------------------------------------------------------
-FROM python:3.10-slim-bullseye AS builder
+WORKDIR /app
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
@@ -20,78 +13,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdk-pixbuf2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /build
-
+# Install Python dependencies
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt \
+RUN pip install --no-cache-dir -r requirements.txt \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
-# --- Stage 2: Installer ---
-FROM python:3.10-slim-bullseye AS installer
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    libcairo2 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf2.0-0 \
-    libffi7 \
-    libcom-err2 \
-    libkrb5-3 \
-    libk5crypto3 \
-    libkrb5support0 \
-    libldap-2.4-2 \
-    libsasl2-2 \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY --from=builder /build/wheels /tmp/wheels
-COPY requirements.txt .
-RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels -r requirements.txt \
-    && rm -rf /tmp/wheels
-
-# --- Stage 3: Runtime — hardened distroless image ---
-FROM gcr.io/distroless/python3-debian11:nonroot AS runtime
-
-# Labels for container registry metadata
-LABEL org.opencontainers.image.title="RetailIQ API" \
-      org.opencontainers.image.description="Flask + Gunicorn production API (Distroless)" \
-      org.opencontainers.image.vendor="RetailIQ"
-
-# Python tuning
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
-
-WORKDIR /app
-
-# Copy site-packages and binaries from installer
-COPY --from=installer /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-COPY --from=installer /usr/local/bin /usr/local/bin
-
-# Ensure Python can find installed packages
-ENV PYTHONPATH=/app:/usr/local/lib/python3.10/site-packages
-
-# Copy system libraries needed by C extensions (psycopg2, cairo, etc.)
-# Note: In Debian, some base libraries reside in /lib/x86_64-linux-gnu
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libpq.so.5 /usr/lib/x86_64-linux-gnu/libpq.so.5
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2 /usr/lib/x86_64-linux-gnu/libgssapi_krb5.so.2
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libkrb5.so.3 /usr/lib/x86_64-linux-gnu/libkrb5.so.3
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libk5crypto.so.3 /usr/lib/x86_64-linux-gnu/libk5crypto.so.3
-COPY --from=installer /lib/x86_64-linux-gnu/libcom_err.so.2 /lib/x86_64-linux-gnu/libcom_err.so.2
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libkrb5support.so.0 /usr/lib/x86_64-linux-gnu/libkrb5support.so.0
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libcairo.so.2 /usr/lib/x86_64-linux-gnu/libcairo.so.2
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libpango-1.0.so.0 /usr/lib/x86_64-linux-gnu/libpango-1.0.so.0
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libpangocairo-1.0.so.0 /usr/lib/x86_64-linux-gnu/libpangocairo-1.0.so.0
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so.0 /usr/lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so.0
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2 /usr/lib/x86_64-linux-gnu/libldap_r-2.4.so.2
-COPY --from=installer /usr/lib/x86_64-linux-gnu/liblber-2.4.so.2 /usr/lib/x86_64-linux-gnu/liblber-2.4.so.2
-COPY --from=installer /usr/lib/x86_64-linux-gnu/libsasl2.so.2 /usr/lib/x86_64-linux-gnu/libsasl2.so.2
+# Force reinstall psycopg2 from source (non-binary) to ensure stable C-extensions
+RUN pip uninstall -y psycopg2-binary && pip install --no-cache-dir psycopg2==2.9.9
 
 # Copy app code
-COPY --chown=nonroot:nonroot . .
+COPY . .
+
+# Clean up build-essential to reduce size (optional)
+RUN apt-get purge -y build-essential && apt-get autoremove -y
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5000
 
-# Distroless entrypoint
-ENTRYPOINT ["/usr/bin/python3"]
-CMD ["-c", "import sys; sys.path.insert(0, '/usr/local/lib/python3.10/site-packages'); from gunicorn.app.wsgiapp import run; run()", "-c", "gunicorn.conf.py", "wsgi:app"]
+ENTRYPOINT ["python3"]
+CMD ["-m", "gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]

@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RetailIQ on-demand bastion host with SSM access for RDS/Redis maintenance.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: Logical environment name tag applied to all resources.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where the bastion host will run.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet (with route to IGW or NAT) for the bastion host.
+  BastionAllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR allowed to reach port 22 if you choose to use SSH. Leave default when using SSM only.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t4g.micro
+      - t4g.small
+      - t4g.medium
+    Description: EC2 instance type for the bastion.
+  KeyPairName:
+    Type: String
+    Default: ''
+    Description: Optional EC2 key pair for SSH. Leave blank to rely on SSM Session Manager.
+  RdsSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: Optional security group ID attached to the RetailIQ RDS instance to auto-allow DB access.
+  RedisSecurityGroupId:
+    Type: String
+    Default: ''
+    Description: Optional security group ID attached to ElastiCache so the bastion can reach Redis on 6379.
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: SSM parameter for the Amazon Linux 2023 AMI.
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+  HasRdsSecurityGroup: !Not [!Equals [!Ref RdsSecurityGroupId, '']]
+  HasRedisSecurityGroup: !Not [!Equals [!Ref RedisSecurityGroupId, '']]
+
+Resources:
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Bastion access for RetailIQ operations
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref BastionAllowedCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion-sg'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Path: /
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion-role'
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BastionRole
+      Path: /
+
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Ref PublicSubnetId
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion'
+        - Key: Environment
+          Value: !Ref EnvironmentName
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf update -y
+          dnf install -y postgresql15 jq git
+          systemctl enable amazon-ssm-agent
+          cat <<'EOF' >/etc/profile.d/retailiq-bastion.sh
+          export PATH="/usr/pgsql-15/bin:$PATH"
+          EOF
+
+  AllowBastionToRds:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasRdsSecurityGroup
+    Properties:
+      GroupId: !Ref RdsSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: Allow bastion host to reach RetailIQ RDS
+
+  AllowBastionToRedis:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasRedisSecurityGroup
+    Properties:
+      GroupId: !Ref RedisSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: Allow bastion host to reach ElastiCache Redis
+
+Outputs:
+  BastionInstanceId:
+    Description: Instance ID of the bastion host
+    Value: !Ref BastionHost
+  BastionSecurityGroupId:
+    Description: Security group protecting the bastion
+    Value: !Ref BastionSecurityGroup
+  BastionPublicIp:
+    Description: Public IP for ad-hoc SSH (use SSM Session Manager whenever possible)
+    Value: !GetAtt BastionHost.PublicIp
+  BastionRoleName:
+    Description: IAM role attached to the bastion host
+    Value: !Ref BastionRole

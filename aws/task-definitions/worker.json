@@ -8,25 +8,25 @@
   "taskRoleArn": "arn:aws:iam::610572473486:role/retailiq-task-role",
   "containerDefinitions": [{
     "name": "retailiq-worker",
-    "image": "610572473486.dkr.ecr.us-east-1.amazonaws.com/retailiq:latest",
+    "image": "610572473486.dkr.ecr.ap-south-1.amazonaws.com/retailiq-api:latest",
     "environment": [
       {"name": "SERVICE_ROLE", "value": "worker"}
     ],
     "secrets": [
-      {"name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/db-url-UZwgrs"},
-      {"name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/redis-url-h6dZNR"},
-      {"name": "CELERY_BROKER_URL", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/celery-broker-url-fkqB00"},
-      {"name": "SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/secret-key-pZqYnJ"},
-      {"name": "JWT_PRIVATE_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/jwt-private-IeuEAW"},
-      {"name": "JWT_PUBLIC_KEY", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/jwt-public-FY3L89"},
-      {"name": "MAIL_USERNAME", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/mail-username-LgXy28"},
-      {"name": "MAIL_PASSWORD", "valueFrom": "arn:aws:secretsmanager:us-east-1:610572473486:secret:retailiq/prod/mail-password-owS9a5"}
+      {"name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/db-url-6tuAb4"},
+      {"name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/redis-url-BFxUxq"},
+      {"name": "CELERY_BROKER_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/celery-broker-url-Evzdmj"},
+      {"name": "SECRET_KEY", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/secret-key-UGXGHU"},
+      {"name": "JWT_PRIVATE_KEY", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/jwt-private-t9ft01"},
+      {"name": "JWT_PUBLIC_KEY", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/jwt-public-WWcqby"},
+      {"name": "MAIL_USERNAME", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/mail-username-coPjqA"},
+      {"name": "MAIL_PASSWORD", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/mail-password-WqmWKU"}
     ],
     "logConfiguration": {
       "logDriver": "awslogs",
       "options": {
         "awslogs-group": "/ecs/retailiq-worker",
-        "awslogs-region": "us-east-1",
+        "awslogs-region": "ap-south-1",
         "awslogs-stream-prefix": "worker"
       }
     },
@@ -37,6 +37,6 @@
       "timeout": 5,
       "retries": 3,
       "startPeriod": 60
-    },
+    }
   }]
 }

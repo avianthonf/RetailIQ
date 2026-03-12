@@ -1,0 +1,11 @@
+{
+  "containerOverrides": [
+    {
+      "name": "retailiq-api",
+      "command": [
+        "-c",
+        "import psycopg2; from alembic.config import Config; from alembic import command; ds = 'postgresql://retailiq_admin:RetailIQ_Prod_2026!@retailiq-prod-db.czmywccq8ktq.ap-south-1.rds.amazonaws.com:5432/postgres'; \ntry:\n    conn = psycopg2.connect(ds); conn.autocommit = True; cur = conn.cursor(); cur.execute('CREATE DATABASE retailiq'); cur.close(); conn.close(); print('DB created')\nexcept Exception as e: print(f'DB trace: {e}')\ncfg = Config('alembic.ini'); command.upgrade(cfg, 'head'); print('Migrated')"
+      ]
+    }
+  ]
+}

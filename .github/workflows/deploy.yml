@@ -1,23 +1,13 @@
 # ============================================================================
-# RetailIQ — Deploy to AWS ECS Fargate
+# RetailIQ — Deploy to AWS ECS Fargate (ap-south-1)
 # ============================================================================
-# Triggers on push to main (after CI passes) or manual dispatch.
+# Triggers on push to main or manual dispatch.
 # Builds the production Docker image, pushes to ECR, and performs a
-# rolling update across API, Worker, and Beat ECS services.
+# rolling update across API and Worker ECS services.
 #
 # Required GitHub Secrets:
-#   AWS_ACCESS_KEY_ID          — IAM user with ECR push + ECS deploy perms
+#   AWS_ACCESS_KEY_ID          — github-deployer IAM user
 #   AWS_SECRET_ACCESS_KEY      — corresponding secret
-#   AWS_REGION                 — e.g. ap-south-1
-#   AWS_ACCOUNT_ID             — 12-digit AWS account number
-#   ECR_REPOSITORY             — ECR repo name (e.g. retailiq)
-#   ECS_CLUSTER                — ECS cluster name
-#   ECS_API_SERVICE            — service name for the API
-#   ECS_WORKER_SERVICE         — service name for Celery worker
-#   ECS_BEAT_SERVICE           — service name for Celery beat
-#   ECS_API_TASK_DEF           — task definition family for API
-#   ECS_WORKER_TASK_DEF        — task definition family for worker
-#   ECS_BEAT_TASK_DEF          — task definition family for beat
 #
 # Optional GitHub Secrets:
 #   SLACK_WEBHOOK_URL          — Slack incoming webhook for deploy notifications
@@ -38,17 +28,19 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false       # never cancel a running deploy
+  cancel-in-progress: false
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: '610572473486'
+  ECR_REGISTRY: 610572473486.dkr.ecr.ap-south-1.amazonaws.com
+  ECR_REPOSITORY: retailiq-api
+  ECS_CLUSTER: retailiq-prod-cluster
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # 1. TEST — gate (reuses optimized CI workflow)
+  # 1. TEST
   # ──────────────────────────────────────────────────────────────────────────
   test:
     name: 🧪 Pre-deploy Tests
@@ -87,7 +79,7 @@ jobs:
             --strict-markers
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 2. BUILD & PUSH — production Docker image
+  # 2. BUILD & PUSH
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: 🐳 Build & Push
@@ -146,18 +138,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
-      max-parallel: 1             # deploy API first, then worker, then beat
+      max-parallel: 1
       matrix:
         service:
           - name: api
-            task_def_secret: ECS_API_TASK_DEF
-            service_secret: ECS_API_SERVICE
+            task_def_family: retailiq-api
+            service_name: retailiq-api
+            container_name: retailiq-api
           - name: worker
-            task_def_secret: ECS_WORKER_TASK_DEF
-            service_secret: ECS_WORKER_SERVICE
-          - name: beat
-            task_def_secret: ECS_BEAT_TASK_DEF
-            service_secret: ECS_BEAT_SERVICE
+            task_def_family: retailiq-worker
+            service_name: retailiq-worker
+            container_name: retailiq-worker
 
     steps:
       - uses: actions/checkout@v4
@@ -172,22 +163,23 @@ jobs:
       - name: Download current task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition ${{ secrets[matrix.service.task_def_secret] }} \
-            --query taskDefinition > aws/task-definitions/${{ matrix.service.name }}.json
+            --task-definition ${{ matrix.service.task_def_family }} \
+            --query taskDefinition > task-def.json
+
       - name: Update task definition with new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: aws/task-definitions/${{ matrix.service.name }}.json
-          container-name: retailiq-${{ matrix.service.name }}
+          task-definition: task-def.json
+          container-name: ${{ matrix.service.container_name }}
           image: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
       - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ secrets[matrix.service.service_secret] }}
-          cluster: ${{ secrets.ECS_CLUSTER }}
+          service: ${{ matrix.service.service_name }}
+          cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
           wait-for-minutes: 15
 
@@ -207,6 +199,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Region** | ap-south-1 |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | retailiq-prod-cluster |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Image Tag** | \`${{ env.IMAGE_TAG }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -219,13 +213,13 @@ jobs:
         with:
           payload: |
             {
-              "text": "✅ RetailIQ deployed to production",
+              "text": "✅ RetailIQ deployed to ap-south-1",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "✅ *RetailIQ deployed to production*\n• Commit: `${{ github.sha }}`\n• By: ${{ github.actor }}\n• <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
+                    "text": "✅ *RetailIQ deployed to ap-south-1*\n• Commit: `${{ github.sha }}`\n• By: ${{ github.actor }}\n• <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>"
                   }
                 }
               ]

@@ -187,10 +187,15 @@ RetailIQ is evolving from a single-region ECS setup to a global, distributed arc
 - **Jaeger**: Distributed tracing across regions.
 - **Loki**: Global log aggregation.
 
-### Runtime Hierarchy
+#### Runtime Hierarchy
 1. **Request Ingress**: Client -> Global LB -> Regional K8s Ingress -> API Pod.
 2. **State Management**: API Pod -> Regional Redis (Cache) / Global CockroachDB (Record).
 3. **Async Processing**: API Pod -> Kafka/Redis Broker -> Celery Worker.
+
+#### ECS Task Startup Watchpoints
+- **Secrets delivery**: `aws/task-definitions/*.json` inject Secrets Manager ARNs for DB/Redis/JWT/mail (@aws/task-definitions/api.json#1-43). Any rotation that changes the ARN suffix requires updating the task def rendered in `.github/workflows/deploy.yml`.
+- **Network reachability**: `scripts/entrypoint.sh` blocks on `wait_for_db` + Redis-based migration locks (@scripts/entrypoint.sh#15-148). Tasks failing to reach PostgreSQL/Redis (security groups, subnets, or wrong URLs) exit before registering with the ECS service, surfacing as `TaskFailedToStart`.
+- **Health checks**: API relies on ALB `/health`; worker/beat use the dummy Python exit-0 health check defined in the task defs. If you change `healthCheck` commands, keep them lightweight to avoid ECS marking the task unhealthy during long migrations.
 
 ### Detailed Component Architecture
 ```mermaid
@@ -1108,12 +1113,29 @@ RetailIQ is engineered as a high-availability, multi-region platform designed to
     alembic upgrade head  # Apply latest migrations
     alembic check         # Verify schema alignment
     ```
+    > **Production RDS note**: the `retailiq` database must be created from an EC2/SSM session inside the production VPC (or via `aws rds-data`) because the DB security group only accepts connections from `sg-api`. Plan bastion access before attempting to run `CREATE DATABASE retailiq;` or manual fixes will fail with timeouts.
 3.  **Quality Control**:
     ```bash
     ruff format .         # Consistent styling
     ruff check .          # Static analysis
     pytest                # Full test suite execution
     ```
+
+### 🛡️ Production Troubleshooting Loop
+1. **Inspect ECS events**: `aws ecs describe-services --cluster $ECS_CLUSTER --services retailiq-api --query 'services[0].events[:5]'` to confirm whether the deployment is stuck on `TaskFailedToStart`, `CannotPullContainer`, or `ServiceStabilizationTimeOut`.
+2. **Drill into tasks**: `aws ecs describe-tasks --cluster $ECS_CLUSTER --tasks <stopped-task-arn>` to read the stoppedReason/errorCode. Cross-check with CloudWatch Logs groups `/ecs/retailiq-*`.
+3. **Validate secrets + env**: Ensure Secrets Manager ARNs referenced in `aws/task-definitions/*.json` still exist and contain the TLS-friendly `rediss://...?ssl_cert_reqs=none` format expected by `normalize_redis_urls()` (@scripts/entrypoint.sh#21-41) and that `DATABASE_URL` uses the private RDS hostname (not `localhost`).
+4. **Network sanity**: Confirm the API security group allows outbound 5432/6379 to the DB/Redis security groups and that subnets provide route to those services; otherwise `wait_for_db.py` will crash repeatedly, causing ECS to stop the task before it reports healthy.
+5. **Bootstrap the database from inside the VPC**: Creating a fresh `retailiq` schema must be done from a host that sits in the same VPC (bastion, SSM session, or ECS exec). Direct attempts from a public workstation will time out even if the instance is temporarily marked PubliclyAccessible because the security group still only trusts the `sg-api` source.
+6. **Spin up the managed bastion when needed**: Deploy `aws/cloudformation/bastion-host.yml` via CloudFormation with your VPC ID, public subnet, and existing RDS/Redis SG IDs to provision an Amazon Linux 2023 host that already has SSM + `psql` installed and SG rules wired. Terminate it after maintenance to avoid idle costs.
+7. **Retry deployment**: After correcting infrastructure issues, re-run `.github/workflows/deploy.yml` (push to `main` or manual dispatch) so the rendered task definition picks up the latest image + secrets.
+
+> **Console workflow to add a public subnet for the bastion**
+> 1. Open **VPC → Subnets → Create subnet**, pick `vpc-038cd68e6bf0d9ace`, choose an AZ, and set the CIDR to `10.0.32.0/20` (or another unused /20).
+> 2. After creation, select the subnet → **Actions → Edit subnet settings** → enable **Auto-assign public IPv4 address**.
+> 3. Go to **Route Tables**, pick the table associated with the new subnet (or create one), add a route `0.0.0.0/0` pointing to the Internet Gateway attached to the VPC, then **Subnet associations → Edit** and attach the new subnet.
+> 4. (Optional) tighten the subnet’s NACL if required, otherwise leave the default allow-all to simplify troubleshooting.
+> 5. Re-run `aws cloudformation deploy --stack-name retailiq-bastion ... --parameter-overrides ... PublicSubnetId=<new-subnet-id>` so the template can launch the bastion with a public IP.
 
 ### 🧪 Testing Strategy
 -   **Unit Tests**: Located in `tests/`, using in-memory SQLite for speed.
@@ -1381,3 +1403,33 @@ Ensure `alembic upgrade head` is part of the deployment script for schema migrat
 
 ## License
 This project is proprietary software for RetailIQ.
+
+---
+
+## 🌏 Production Environment (ap-south-1)
+
+RetailIQ is deployed in a high-availability production configuration in the **ap-south-1 (Mumbai)** region.
+
+### Infrastructure Architecture
+- **VPC** (`retailiq-prod-ap`): 10.20.0.0/16
+- **Compute**: AWS ECS Fargate (2 subnets across AZs)
+- **Database**: Amazon RDS PostgreSQL 15.10 (`retailiq-prod-db`)
+- **Cache**: Amazon ElastiCache Redis 7.0 (`retailiq-redis`)
+- **Secrets Management**: AWS Secrets Manager (regional)
+- **Container Registry**: Amazon ECR (`retailiq-api`)
+
+### Access and Verification
+The API and Worker services are orchestrated by ECS. To verify the environment health:
+1. **API Logs**: `aws logs tail /ecs/retailiq-api --region ap-south-1`
+2. **Worker Logs**: `aws logs tail /ecs/retailiq-worker --region ap-south-1`
+3. **Database Connectivity**: Verified via bootstrap task migrations.
+
+### Deployment Workflow
+Manual deployment steps (for initial standup):
+1. **Provision Networking/DB/Redis** (AWS CLI).
+2. **Update Secrets Manager** with RDS/Redis primary endpoints.
+3. **Build and Push** production image to ECR.
+4. **Register Task Definitions** with Secrets Manager ARNs.
+5. **Launch ECS Services** and perform database bootstrap.
+
+---
