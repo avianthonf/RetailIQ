@@ -35,7 +35,7 @@ The API is live on AWS ECS Fargate and accessible via the Application Load Balan
 
 ```bash
 # Health Check Endpoint
-curl http://retailiq-alb-1647913544.us-east-1.elb.amazonaws.com/api/v1/health
+curl http://retailiq-prod-alb-ap-788582259.ap-south-1.elb.amazonaws.com/api/v1/health
 ```
 
 **Auto-Deployment**: Merging or pushing to the `main` branch automatically triggers the `.github/workflows/deploy.yml` pipeline. The CI/CD has been optimized to run under 3 minutes using:
@@ -265,6 +265,19 @@ We are currently in **Phase 1: Foundation**. Highlights:
 - **CockroachDB Shadow Replication**: Real-time CDC from legacy PostgreSQL 15.
 - **Full Observability**: Live metrics, traces, and logs in `/observability`.
 
+### Independent Verification Snapshot (2026-03-12)
+- **Blueprint Coverage**: Flask registers 30+ blueprints in `app/__init__.py` with v1/v2 prefixes; verified routing remains aligned to operational domains (auth, transactions, suppliers, pricing, etc.).
+- **Spec Drift Watchlist**: OpenAPI currently omits `/api/v1/ops/maintenance` (referenced by multiple Flutter prompts) and represents certain parameterized paths literally (e.g., `"/api/v1/customers/<int:customer_id>"`). These gaps should be triaged before frontend consumption.
+- **Security Instrumentation**: Rate limiting, JWT enforcement, and audit logging are applied in code (`app/auth/decorators.py`, `app/utils/audit.py`), but `bandit_out.txt` shows 129 skipped files because of parsing errors—CI needs follow-up to ensure scans cover every module.
+- **Operational Hooks**: Celery tasks such as `rebuild_daily_aggregates`, `evaluate_alerts`, and webhook delivery (`app/tasks/tasks.py`, `app/tasks/webhook_tasks.py`) include Redis locks/idempotency, giving confidence in async backfills and alerting.
+- **Infrastructure Alignment**: `.github/workflows/ci.yml`, `aws/task-definitions/*.json`, and `observability/` manifests remain the source of truth for deployment/telemetry; verification confirmed they still reference Redis/Postgres endpoints and logging sinks documented elsewhere in this README.
+
+#### Backend vs Prompt Alignment (2026-03-12)
+- **Current Coverage**: Inventory, transactions/POS, supplier lifecycle, pricing suggestion intake, and loyalty/finance endpoints in the Flask app already satisfy the data contracts described across Flutter prompts 03–09, so those mobile flows can proceed using the documented JSON envelopes.
+- **Documented Gaps**: The prompts depend on `/api/v1/ops/maintenance`, observability connector management, developer usage metrics, and pricing simulation routes that are either missing from the OpenAPI spec or absent in code. Treat these as spec drift until the backend ships the endpoints and the OpenAPI documents them.
+- **Risk Posture**: Because the maintenance flag gates auth flows (prompts 01–02) and observability SSE feeds support prompt 10 dashboards, their absence is a **Medium** operational risk; add remediation tickets and block Flutter GA on resolving them.
+- **Integration Guardrails**: Continue to enforce `standard_json` envelopes, add regression tests mirroring prompts (supplier receiving, pricing apply, finance payouts), and run spec/code diffing in CI so future prompt updates cannot outpace backend coverage.
+
 ## 🏗️ Architecture
 
 RetailIQ uses a powerful modular architecture spanning backend microservices, planet-scale databases, and now a cross-platform mobile edge.
@@ -275,12 +288,20 @@ RetailIQ uses a powerful modular architecture spanning backend microservices, pl
 - `app/forecasting/` & `app/ai_v2/` – Predicts inventory depletion and recommends pricing using ML.
 - `app/sync/` - Conflict-free Replicated Data Type (CRDT) engine for edge offline-sync capabilities.
 
-### Mobile Edge Architecture (Team 7)
-The RetailIQ mobile stack relies on **Kotlin Multiplatform (KMP)**.
-- **Shared (`mobile/shared/`)**: Domain models, Ktor APIs, SQLDelight DB schema, CRDT Sync Engine, Koin DI, Auth.
-- **Android (`mobile/androidApp/`)**: Jetpack Compose reactive UI.
-- **iOS (`mobile/iosApp/`)**: SwiftUI with AVFoundation barcode scanning + Apple Push Notifications.
-- **Web (`mobile/pwa/`)**: React + TypeScript PWA featuring Service Workers, caching strategies, and indexedDB offline persistence.
+#### Backend Completion Checklist (2026-03-12)
+1. **Ship `/api/v1/ops/maintenance`**: Implement controller, persistence, and caching so prompts 01–02 can gate auth flows and prompt 10 can toggle downtime banners; update OpenAPI and add smoke tests in `tests/test_ops.py`.
+2. **Add observability connector APIs**: Cover `/api/v1/observability/connectors` CRUD + validation plus SSE feed (`/api/v1/observability/events`) required by prompt 10 dashboards.
+3. **Expose developer usage metrics**: Extend `app/developer/routes.py` with `/api/v1/developer/usage` + rate-limit status to power prompt 09 telemetry cards.
+4. **Complete pricing simulation flow**: Add `/api/v1/pricing/simulate` service + Celery job so prompt 07 can run what-if analysis; document schema in OpenAPI.
+5. **Normalize OpenAPI path params**: Replace literal Flask converters (e.g., `<int:id>`) with `{id}` placeholders to unblock client generation and statically referenceable routes.
+6. **Spec ↔ code diff automation**: Add CI step comparing Flask blueprints vs `openapi.json/openapi_full.json`; fail when drift like the maintenance endpoint occurs.
+7. **Unblock security tooling**: Fix `bandit` import errors so the scan stops skipping 129 files; capture the clean artifact in CI.
+8. **Migration tooling DX**: Document fallback `DATABASE_URL` (sqlite) for `alembic check` in `.env.example` and guard `migrations/env.py` so the command cannot run with an empty URL.
+9. **Regression coverage**: Add integration tests for supplier receiving, pricing apply/dismiss, finance payout ledger, and developer usage endpoints to reflect Flutter prompt contracts.
+
+#### Frontend Prompt Corpus (2026-03-12)
+- All Flutter architectural directives now live as Markdown files under `/prompts/*.md` (e.g., `flutter_prompt_01_foundation.md`). Rename removes `.txt` drift and lets documentation tooling render them with rich formatting.
+- Treat these prompts as contractual guidance for the Flutter shell, auth, inventory, POS, suppliers, pricing, loyalty, analytics, and settings modules referenced throughout this architecture section.
 
 ## 🚀 Getting Started
 
@@ -872,6 +893,11 @@ Branch protection recommended:
 
 ## Operations and Troubleshooting
 
+### AWS ap-south-1 Deployment Prompt
+- **Source**: `prompts/deployment_prompt_aws_ap_south_1.md`
+- **Scope**: End-to-end infra playbook covering ECS cluster recreation, ALB wiring, Secrets Manager population, GitHub Actions deploy prerequisites, and CloudWatch log access for the ap-south-1 region.
+- **Usage**: Treat this prompt as the authoritative checklist before provisioning or rotating the production environment. It mirrors the DEPLOYMENT.md details but adds explicit CLI snippets for secrets, ALB DNS retrieval, and log tailing workflows to keep ops in sync with mobile/backend expectations.
+
 ## Health endpoint
 - `GET /api/v1/health` returns app-level status payload.
 
@@ -921,9 +947,22 @@ You can import `openapi.json` into tools like **Postman**, **Insomnia**, or **Sw
 
 RetailIQ is designed as a **Planet-Scale Modular Monolith**, strategically built to transition towards a globally distributed, high-performance architecture. OpenAPI generation scripts (`extract_routes.py` and `build_openapi.py`) automate API schemas directly from Flask blueprints.
 
+### Flutter Frontend Architecture & Prompt Suite
+RetailIQ now prescribes a unified Flutter 3.16+ client for Android tablets, rugged POS hardware, and modern browsers. The frontend adheres to a layered structure (`app/`, `core/`, `data/`, `domain/`, `features/<module>/presentation`) with GoRouter-driven navigation, adaptive layouts, and responsive breakpoints (phone <600dp, tablet <1024dp, desktop ≥1024dp). Shared primitives (`RetailScaffold`, `RetailSplitPane`, themed typography, accessibility toggles) must be reused across modules to guarantee consistency with the branding tokens defined in Prompt 01.
+
+All Flutter workstreams are kicked off via the curated prompt suite under `prompts/flutter_prompt_*.txt`. Each prompt maps directly to a backend domain (auth, dashboard, inventory, POS, suppliers, pricing, loyalty/finance, analytics, platform settings) and binds UI decisions to canonical REST/WebSocket contracts from `openapi.json`. Engineers should treat the prompts as executable specs: every screen, DTO, caching rule, and offline policy is enumerated so that mobile/web feature parity remains intact.
+
+The frontend consumes the same observability and feature-flag infrastructure as the backend. Environment selection relies on sealed `BackendEnvironment` descriptors, Dio clients share interceptors for auth/telemetry, and Riverpod/Bloc state machines enforce deterministic state transitions. Golden tests (`golden_toolkit`) and integration harnesses must validate router guards, theming, offline queues, and service resiliency as outlined in the prompt set.
+
 ### Local Orchestration Layer
 - **Docker Compose Mesh**: Local developers run the full stack (`app`, `worker`, `beat`, `postgres`, `redis`) inside a shared bridge network. Compose now forces internal DNS hostnames (`postgres`, `redis`) for `DATABASE_URL`/`REDIS_URL`, preventing `localhost` leaks that previously caused startup failures. Celery containers rely on the baked-in non-root `app` user, so no extra `--uid/--gid` flags are needed.
 - **Resilient Bootstrapping**: Celery configuration enforces `broker_connection_retry_on_startup=True`, matching ECS production behavior so dev clusters auto-retry Redis during boot storms or while Docker brings up dependencies.
+
+### ECS Fargate + ALB Control Plane
+- **Cluster Composition**: `retailiq-prod` ECS cluster runs three services (`retailiq-api`, `retailiq-worker`, `retailiq-beat`) mapped to dedicated Fargate task definitions with strict `awsvpc` networking and Secrets Manager mounts for DB/Redis/JWT material (@DEPLOYMENT.md#315-386).
+- **North-South Entry**: An internet-facing Application Load Balancer (`retailiq-prod-alb-ap`) fronts the API. Listener 80 redirects to 443, and the HTTPS listener forwards to `retailiq-api-tg`, which health-checks `/health` on port 5000 (@DEPLOYMENT.md#387-425).
+- **Service Binding Rules**: `aws ecs create-service` must reference `containerName=retailiq-api` and `containerPort=5000`, exactly matching the task definition. Any mismatch (e.g., `containerName=api`) leads to `InvalidParameterException` because ECS cannot wire the target group to an undefined container (@DEPLOYMENT.md#334-381).
+- **Deletion Precedence**: When rotating infrastructure, always detach listeners → target groups → ALB before deleting ECS services; otherwise, orphaned target groups block recreation. Likewise, delete services before clusters so `aws ecs delete-cluster` accepts the request without `ClusterContainsServicesException`.
 
 ### Architectural Tiers
 
@@ -971,6 +1010,12 @@ graph TD
 ## 25. Comprehensive Developer and Engineer Guide
 
 Welcome to the Developer and Engineer Guide for RetailIQ. This guide summarizes best practices when contributing to the codebase.
+
+### Flutter Prompt Authoring & Consumption Workflow
+- **Prompt Source of Truth**: The eleven Flutter prompts (`prompts/flutter_prompt_01_foundation.txt` … `flutter_prompt_11_independent_verification.txt`) define UX, data bindings, validation requirements, and verification checklists per domain. Update the relevant prompt before implementing substantive frontend changes so downstream teams inherit the authoritative contract.
+- **Traceability**: Link Flutter PRs back to the prompt file and OpenAPI tag it references. Each feature module should document which prompt revision it implements in its README or doc comments.
+- **Testing Discipline**: Follow the prompt-mandated test suites (golden tests, integration tests, offline reconciliation). Ensure `melos`/`very_good_analysis` pipelines stay green before merging Flutter changes.
+- **Backend Alignment**: Any deviation from the documented REST/WS shapes in the prompts requires a synchronized OpenAPI update plus backend change; never fork the contracts in the client.
 
 ### UTC Standardization and Timezones
 Given RetailIQ's multi-region architecture (planet-scale), date and time handling is critical.
@@ -1345,6 +1390,8 @@ For the comprehensive step-by-step guide, including architecture diagrams, cost 
 This guide provides technical deep-dives for engineers contributing to RetailIQ.
 
 ### 1. Development Principles
+- **Infra Runbooks as Prompts**: Operational prompts (e.g., `deployment_prompt_aws_ap_south_1.md`) live in `/prompts` beside the Flutter briefs. Update these Markdown files before changing ECS/ALB/GitHub Actions wiring so every engineer and SRE shares the same ground truth.
+- **Prompt Source of Truth**: Each Flutter brief is stored as Markdown (`/prompts/flutter_prompt_*.md`). Keep backend DTOs and envelopes aligned with the scenarios captured there before merging API changes.
 - **Domain-Driven Design (DDD)**: Each module (e.g., `inventory`, `transactions`) should encapsulate its own domain logic and models.
 - **Fail-Fast Validation**: Use Marshmallow schemas to validate all incoming request data at the ingestion point.
 - **Async by Default**: Offload any operation taking >200ms or involving external APIs to Celery.
@@ -1399,6 +1446,21 @@ Changes merged to `main` are automatically deployed to AWS ECS. The deployment p
 
 Ensure `alembic upgrade head` is part of the deployment script for schema migrations.
 
+### Independent Verification Notes (2026-03-12)
+- **Alembic Checks Require Configuration**: Running `alembic check` locally fails unless `DATABASE_URL` is set (see `migrations/env.py`). Update `.env.example` or developer onboarding docs so engineers populate a Postgres URL before running schema parity commands.
+- **Security Tooling**: CI installs `bandit==1.7.8` and `pip-audit==2.7.3` (`.github/workflows/ci.yml`), but the produced `bandit_out.txt` indicates the scan skips many modules because of import errors. Engineers should reproduce locally and resolve the root causes so the report covers every package touched by prompts.
+- **Spec Alignment Workflow**: Before adjusting backend routes or Flutter prompts, diff against `openapi.json`/`openapi_full.json`. If gaps like the missing maintenance endpoints are discovered, treat the OpenAPI file as the source of truth and open a PR updating both spec and implementation simultaneously.
+- **End-to-End Testing Expectations**: Critical transaction stories (single sale, batch import, returns) are backed by `tests/test_transactions.py`; similar coverage should be enforced for suppliers, pricing, and finance modules before mobile GA.
+- **Frontend Contracts**: Prompt 01–10 enforce layered Flutter architecture (foundation shell, auth, inventory, POS, suppliers, pricing/forecasting, loyalty/finance, analytics/AI, settings/platform). Backend contributors must keep DTO/envelope changes backwards compatible or coordinate updates with the prompt owners to avoid integration drift.
+
+### Backend Remediation Playbook (2026-03-12)
+1. **Discovery**: Run the spec-code diff script and review Flutter prompt references to identify missing endpoints before each release cycle.
+2. **Implementation**: When adding endpoints (maintenance, observability, developer usage, pricing simulation) keep logic in domain services and reuse `standard_json` envelopes to stay contract-compatible.
+3. **Documentation**: Update `openapi.json`, `README`, and prompt annotations in the same PR so frontend authors always have the authoritative schema.
+4. **Security & Quality Gates**: Re-run Bandit/pip-audit after each change set and do not merge until the scanners report 0 skipped files; enforce `alembic check` with populated `DATABASE_URL`.
+5. **Testing**: Mirror Flutter flows with pytest integration suites (supplier receiving, pricing apply/dismiss, finance payouts, maintenance toggles, observability connectors) and include regression fixtures for developer usage metrics.
+6. **Operational Readiness**: Add runbooks for the new endpoints (maintenance + observability) covering cache busting, rollout sequencing, and alerting hooks so SRE can operate them confidently.
+
 ---
 
 ## License
@@ -1406,9 +1468,55 @@ This project is proprietary software for RetailIQ.
 
 ---
 
+## ☁️ Deployment (Select Platform)
+
+RetailIQ is designed to be platform-agnostic. Choose your architecture:
+
+### 1. Render (Recommended / One-Click)
+- **Status**: Ready for Deployment.
+- **Workflow**: Auto-provisioning via `render.yaml`.
+- **Guide**: See [render_guide.md](file:///C:/Users/avian/.gemini/antigravity/brain/bd91a305-23dc-4afe-b0ef-3c1f07a97353/render_guide.md).
+
+### 2. AWS (Advanced / ap-south-1)
+- **Status**: Partially Configured (VPC, RDS, Redis active).
+- **Workflow**: Manual ECS/ALB wiring required.
+- **Guide**: See [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+---
+
 ## 🌏 Production Environment (ap-south-1)
 
 RetailIQ is deployed in a high-availability production configuration in the **ap-south-1 (Mumbai)** region.
+
+### 🏗️ Production System Architecture
+
+The environment uses a shared-nothing distributed architecture:
+- **Networking**: VPC `10.20.0.0/16` with public/private subnet isolation. API and Worker tasks reside in private subnets with NAT Gateway for outbound connectivity.
+- **Compute (ECS Fargate)**:
+  - `retailiq-api`: Scaled to 2 tasks. Runs the Flask/Gunicorn app.
+  - `retailiq-worker`: Scaled to 1 task. Runs the Celery worker pool.
+- **Data Layers**:
+  - **RDS PostgreSQL 15.10**: Primary transactional storage.
+  - **ElastiCache Redis 7.0**: Used both as high-speed cache and Celery broker.
+- **Security**: IAM policies are scoped to specific ECR repositories and Secrets Manager ARNs.
+
+### 🛠️ Developer and Engineer Guide (ap-south-1 Ops)
+
+#### 1. Boot Diagnostics
+If a container fails to start (Exit Code 3 or 1):
+- **Check CloudWatch**: Logs are in `/ecs/retailiq-api` and `/ecs/retailiq-worker`.
+- **Verify Redis Scheme**: Ensure `REDIS_URL` uses `redis://` (NOT `rediss://`) as transit encryption is disabled on this cluster.
+- **Check Role CLI**: The worker MUST use the `celery` CLI as its entrypoint, not a Python script, to ensure proper signal handling and argument parsing.
+
+#### 2. Manual Scaling
+```bash
+aws ecs update-service --cluster retailiq-prod-cluster --service retailiq-api --desired-count 4 --region ap-south-1
+```
+
+#### 3. Database Maintenance
+Migrations should be run via ECS Tasks or a Bastion host within the VPC. Direct DB access from the internet is blocked by security groups.
+
+---
 
 ### Infrastructure Architecture
 - **VPC** (`retailiq-prod-ap`): 10.20.0.0/16
