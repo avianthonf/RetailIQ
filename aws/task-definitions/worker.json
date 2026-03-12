@@ -12,7 +12,8 @@
     "environment": [
       {"name": "SERVICE_ROLE", "value": "worker"}
     ],
-    "command": ["celery_worker.py"],
+    "entryPoint": ["celery"],
+    "command": ["-A", "celery_worker.celery_app", "worker", "--loglevel=info"],
     "secrets": [
       {"name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/db-url-6tuAb4"},
       {"name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/redis-url-BFxUxq"},
