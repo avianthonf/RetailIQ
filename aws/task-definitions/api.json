@@ -3,7 +3,7 @@
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
-  "memory": "2048",
+  "memory": "4096",
   "executionRoleArn": "arn:aws:iam::610572473486:role/ecsTaskExecutionRole",
   "taskRoleArn": "arn:aws:iam::610572473486:role/retailiq-task-role",
   "containerDefinitions": [{

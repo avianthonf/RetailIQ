@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2-dev \
     libpango1.0-dev \
     libgdk-pixbuf2.0-dev \
+    libssl-dev \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -18,19 +20,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Force reinstall psycopg2 from source (non-binary) to ensure stable C-extensions
-RUN pip uninstall -y psycopg2-binary && pip install --no-cache-dir psycopg2==2.9.9
-
 # Copy app code
 COPY . .
 
-# Clean up build-essential to reduce size (optional)
-RUN apt-get purge -y build-essential && apt-get autoremove -y
-
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV GUNICORN_LOG_LEVEL=debug
 
 EXPOSE 5000
 
 ENTRYPOINT ["python3"]
-CMD ["-m", "gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]
+CMD ["wsgi.py"]

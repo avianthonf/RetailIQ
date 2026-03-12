@@ -2,8 +2,8 @@
   "family": "retailiq-worker",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "1024",
+  "cpu": "1024",
+  "memory": "2048",
   "executionRoleArn": "arn:aws:iam::610572473486:role/ecsTaskExecutionRole",
   "taskRoleArn": "arn:aws:iam::610572473486:role/retailiq-task-role",
   "containerDefinitions": [{
@@ -12,6 +12,7 @@
     "environment": [
       {"name": "SERVICE_ROLE", "value": "worker"}
     ],
+    "command": ["python3", "celery_worker.py", "worker", "--loglevel=info"],
     "secrets": [
       {"name": "DATABASE_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/db-url-6tuAb4"},
       {"name": "REDIS_URL", "valueFrom": "arn:aws:secretsmanager:ap-south-1:610572473486:secret:retailiq/prod/redis-url-BFxUxq"},

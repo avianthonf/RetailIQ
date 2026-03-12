@@ -1,0 +1,8 @@
+{
+  "containerOverrides": [
+    {
+      "name": "retailiq-api",
+      "command": ["-c", "import sys; from app import create_app; try: create_app(); print('App init successful'); except Exception as e: import traceback; traceback.print_exc(); sys.exit(1)"]
+    }
+  ]
+}
