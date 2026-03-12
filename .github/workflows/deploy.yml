@@ -74,12 +74,21 @@ jobs:
         run: |
           set -euo pipefail
           payload=$(jq -n --arg clear "$CLEAR_CACHE_FLAG" '{clearCache: ($clear == "true")}')
-          response=$(curl -sS -X POST "${RENDER_API_BASE}/blueprints/${RENDER_BLUEPRINT_ID}/deploys" \
+          tmp_response=$(mktemp)
+          http_status=$(curl -sS -o "$tmp_response" -w "%{http_code}" -X POST "${RENDER_API_BASE}/blueprints/${RENDER_BLUEPRINT_ID}/deploys" \
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
             -d "$payload")
 
-          echo "API response: $response"
+          cat "$tmp_response"
+          echo "\nHTTP status: $http_status"
+
+          if [[ "$http_status" -ge 400 ]]; then
+            echo "::error::Render API call failed. Verify RENDER_BLUEPRINT_ID and API token permissions." >&2
+            exit 1
+          fi
+
+          response=$(cat "$tmp_response")
           deploy_id=$(echo "$response" | jq -r '.id // empty')
           status=$(echo "$response" | jq -r '.status // "unknown"')
 
