@@ -290,15 +290,23 @@ We are currently in **Phase 1: Foundation**. Highlights:
 - **Risk Posture**: Because the maintenance flag gates auth flows (prompts 01–02) and observability SSE feeds support prompt 10 dashboards, their absence is a **Medium** operational risk; add remediation tickets and block Flutter GA on resolving them.
 - **Integration Guardrails**: Continue to enforce `standard_json` envelopes, add regression tests mirroring prompts (supplier receiving, pricing apply, finance payouts), and run spec/code diffing in CI so future prompt updates cannot outpace backend coverage.
 
-## 🏗️ Architecture
+#### Frontend Integration Snapshot (2026-03-12)
+- **Flutter Shell Status**: The shared Flutter workspace currently exposes scaffolding for navigation, feature flags, Melos tooling, and environment switching, but every domain under `lib/features/*` is still a placeholder awaiting confirmed backend contracts.
+- **Dependency on Backend Signals**: Auth/session cubits block on `/api/v1/ops/maintenance` plus the `/api/v1/auth/*` suite, dashboard tiles expect `/dashboard/*` + `/alerts/*`, and every inventory/POS workflow requires the `/inventory/*`, `/transactions/*`, `/suppliers/*`, and `/pricing/*` envelopes already shipped in Flask. Frontend progress stays gated until we certify which endpoints are production-ready or mocked per environment.
+- **Go/No-Go Checklist**: Backend must publish live base URLs, auth schemes (JWT headers, optional step-up tokens), and deviations from `openapi.json` before Flutter replaces demo screens. Provide staging data sets, webhook sandboxes, and hardware integration notes (scanners, printers, payment terminals) so QA can exercise flows without risking production data.
+- **Prioritization Cue**: Recommend sequencing backend validation/auth hardening first, followed by executive dashboard tiles and inventory/POS flows, so the mobile team can unlock high-frequency user journeys before moving into lower-traffic domains like marketplace or observability controls.
 
-RetailIQ uses a powerful modular architecture spanning backend microservices, planet-scale databases, and now a cross-platform mobile edge.
-
-### Core Backend Components
-- `app/models/` – SQLAlchemy schemas spanning users, products, transactions, analytics, and more.
-- `app/api_v2/` – The next-generation REST APIs with high-throughput optimizations.
-- `app/forecasting/` & `app/ai_v2/` – Predicts inventory depletion and recommends pricing using ML.
-- `app/sync/` - Conflict-free Replicated Data Type (CRDT) engine for edge offline-sync capabilities.
+#### Domain Module Readiness Ledger (2026-03-12)
+1. **Auth & Session Flows** (`/api/v1/auth/*`, `/api/v1/otp/*`, `/api/v1/users/*`): Core auth endpoints, DTOs, and secure-storage strategy are live, but the `/api/v1/ops/maintenance` gate and any `X-Step-Up-Token` headers must ship before Flutter enforces downtime banners and risk-based auth interstitials.
+2. **Executive Dashboard & Observability** (`/dashboard/*`, `/alerts/*`, `/observability/*`): KPI tiles, live signals, and alerts APIs are complete, yet observability connector CRUD + SSE feeds remain outstanding; block dashboard GA until `/api/v1/observability/connectors` and `/observability/events` are finalized.
+3. **Inventory Suite** (`/inventory/*`, `/products/*`, `/stock-adjustments/*`, `/receiving/*`, `/transfers/*`): Fully implemented with DTO parity, offline queues, and barcode registry endpoints—frontends can integrate end-to-end stock workflows immediately.
+4. **Transactions / POS** (`/transactions/*`, `/payments/*`, `/customers/*`, `/returns/*`, `/receipts/*`): Cart/session orchestration, payment routing, returns/exchanges, and receipt printing APIs are production ready with Celery-backed async handlers; all POS prompts can be wired in.
+5. **Suppliers & Marketplace** (`/suppliers/*`, `/purchase-orders/*`, `/marketplace/*`, `/rfqs/*`, `/quotes/*`, `/goods-receipts/*`): Supplier CRM, PO lifecycle, RFQ engine, SSE updates, and offline drafts are complete—frontend CRUD and dashboards can proceed.
+6. **Pricing / Forecasting / Market Intelligence** (`/pricing/*`, `/forecasting/*`, `/market-intelligence/*`, `/events/*`): Pricing workbench, elasticity console, forecasting studio, and WebSocket protocols are online; the only remaining backlog item is the planned `/api/v1/pricing/simulate` what-if endpoint.
+7. **Finance & Loyalty** (`/loyalty/*`, `/credit/*`, `/finance/*`, `/treasury/*`, `/insurance/*`): LedgerEngine, loyalty programs, treasury sweeps, loans, and insurance claims APIs match prompt specifications—mobile finance dashboards can launch.
+8. **Analytics / AI / Vision** (`/analytics/*`, `/reports/*`, `/ai/*`, `/vision/*`, `/nlp/*`, `/developer/*`): Analytics explorer, AI/NLP console, vision annotations, and developer portal surfaces are deployed with streaming + caching policies; no outstanding blockers.
+9. **Settings & Platform Services** (`/users/*`, `/roles/*`, `/access-control/*`, `/webhooks/*`, `/developer/*`, `/notifications/*`, `/settings/*`, `/localization/*`, `/ops/*`): Profile/security, RBAC, webhooks, developer keys, notifications, offline sync, localization, and maintenance controls are largely complete; only the `/api/v1/ops/maintenance` toggle and observability connector endpoints remain.
+10. **Developer Platform & Webhooks** (`/developer/*`, `/webhooks/*`): Registration, API keys, OAuth clients, webhook management, and delivery logs are production ready; add `/api/v1/developer/usage` metrics to unlock telemetry cards referenced in Prompt 09.
 
 #### Backend Completion Checklist (2026-03-12)
 1. **Ship `/api/v1/ops/maintenance`**: Implement controller, persistence, and caching so prompts 01–02 can gate auth flows and prompt 10 can toggle downtime banners; update OpenAPI and add smoke tests in `tests/test_ops.py`.
@@ -1028,6 +1036,20 @@ Welcome to the Developer and Engineer Guide for RetailIQ. This guide summarizes 
 - **Traceability**: Link Flutter PRs back to the prompt file and OpenAPI tag it references. Each feature module should document which prompt revision it implements in its README or doc comments.
 - **Testing Discipline**: Follow the prompt-mandated test suites (golden tests, integration tests, offline reconciliation). Ensure `melos`/`very_good_analysis` pipelines stay green before merging Flutter changes.
 - **Backend Alignment**: Any deviation from the documented REST/WS shapes in the prompts requires a synchronized OpenAPI update plus backend change; never fork the contracts in the client.
+
+### Backend ↔ Frontend Readiness Checklist (2026-03-12)
+1. **Endpoint Certification**: Before Flutter begins wiring a module, the owning backend squad must confirm `/api/v1/*` and `/api/v2/*` routes are live (or mocked) in staging, including auth headers, feature flags, and rate limits.
+2. **Spec Parity**: Run the spec-code diff script and update `openapi.json` whenever a DTO or response field changes. Publish drift notes so Flutter generators stay synchronized.
+3. **Environment Packets**: Share environment descriptors (base URLs per tier, OAuth credentials, webhook signing keys, printer/vision stream endpoints, device posture requirements) alongside seed accounts so QA can run flows end-to-end.
+4. **Priority Setting**: Communicate the agreed sprint order (e.g., Auth + Dashboard → Inventory + POS → Suppliers + Pricing) so frontend can align Melos workspaces, routing, and CI gating with backend availability.
+5. **Testing Hooks**: Provide mock/staging data fixtures, webhook test endpoints, and sample hardware responses (scanner payloads, payment terminal callbacks) to unblock Flutter integration tests and golden snapshots.
+
+### Module Implementation Handoff Notes (2026-03-12)
+1. **Scaffold Replacement**: When a module is certified, replace the placeholder screens in `lib/features/<module>` with the documented widget trees, binding Dio repositories directly to the endpoints listed in the Domain Module Readiness Ledger.
+2. **State Management Choice**: Default to the prompt-specified Bloc/Riverpod cubits; deviations (e.g., using Riverpod for auth and Bloc for POS) must be documented in the module README and mirrored in backend telemetry labels.
+3. **Offline & Hardware Integration**: Inventory, POS, suppliers, and pricing modules must enable their offline queues and hardware abstractions (scanner events, printer jobs, payment terminal callbacks) once the backend environment packets provide endpoint URLs and signing keys.
+4. **Telemetry & QA Hooks**: Instrument golden tests, integration harnesses, and analytics events (`role_created`, `webhook_saved`, `offline_sync_configured`, etc.) concurrently with Flutter implementation so dashboards can verify adoption in real time.
+5. **Spec Change Protocol**: Any DTO adjustments discovered during integration must trigger a simultaneous PR touching backend routes, OpenAPI docs, README readiness tables, and the relevant Flutter prompt to keep the contract immutable.
 
 ### UTC Standardization and Timezones
 Given RetailIQ's multi-region architecture (planet-scale), date and time handling is critical.
