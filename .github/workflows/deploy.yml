@@ -1,16 +1,16 @@
 # ============================================================================
-# RetailIQ — Deploy to AWS ECS Fargate (ap-south-1)
+# RetailIQ — Deploy to Render (Blueprint driven, <5 min GitHub runtime)
 # ============================================================================
 # Triggers on push to main or manual dispatch.
-# Builds the production Docker image, pushes to ECR, and performs a
-# rolling update across API and Worker ECS services.
+# Kicks off a Render blueprint deploy (render.yaml) so Render builds the
+# latest commit and rolls it out to the api + worker services.
 #
 # Required GitHub Secrets:
-#   AWS_ACCESS_KEY_ID          — github-deployer IAM user
-#   AWS_SECRET_ACCESS_KEY      — corresponding secret
+#   RENDER_API_KEY         — Render API token with Blueprint + Service access
+#   RENDER_BLUEPRINT_ID    — Blueprint identifier (bp-xxxxx)
 #
 # Optional GitHub Secrets:
-#   SLACK_WEBHOOK_URL          — Slack incoming webhook for deploy notifications
+#   RENDER_NOTIFY_WEBHOOK  — Slack/Teams webhook for deploy pings
 # ============================================================================
 
 name: Deploy
@@ -20,64 +20,99 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      skip_tests:
-        description: 'Skip test job (emergency hotfix only)'
+      clear_cache:
+        description: 'Force Render to rebuild without cached layers'
         required: false
         default: false
         type: boolean
 
 concurrency:
-  group: deploy-production
+  group: deploy-render-production
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
-  AWS_REGION: ap-south-1
-  AWS_ACCOUNT_ID: '610572473486'
-  ECR_REGISTRY: 610572473486.dkr.ecr.ap-south-1.amazonaws.com
-  ECR_REPOSITORY: retailiq-api
-  ECS_CLUSTER: retailiq-prod-cluster
-  IMAGE_TAG: ${{ github.sha }}
+  RENDER_API_BASE: https://api.render.com/v1
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # 1. TEST
-  # ──────────────────────────────────────────────────────────────────────────
-  test:
-    name: 🧪 Pre-deploy Tests
-    if: ${{ github.event.inputs.skip_tests != 'true' }}
+  deploy:
+    name: 🚀 Render Blueprint Deploy
     runs-on: ubuntu-latest
-
-    env:
-      SECRET_KEY: ci-test-secret-key
-      FLASK_ENV: development
-      PYTHONUNBUFFERED: '1'
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Create .env from example
-        run: cp .env.example .env
-
-      - name: Install dependencies
+      - name: Validate required secrets
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_BLUEPRINT_ID: ${{ secrets.RENDER_BLUEPRINT_ID }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install pytest-xdist
+          set -euo pipefail
+          missing=0
+          for var in RENDER_API_KEY RENDER_BLUEPRINT_ID; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing required secret: ${var}" >&2
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
-      - name: Run test suite
+      - name: Trigger Render blueprint deploy
+        id: trigger
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_BLUEPRINT_ID: ${{ secrets.RENDER_BLUEPRINT_ID }}
+          RENDER_API_BASE: ${{ env.RENDER_API_BASE }}
+          CLEAR_CACHE_FLAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.clear_cache || 'false' }}
         run: |
-          pytest tests/ \
-            -v \
-            -n auto \
-            --tb=short \
-            --strict-markers
+          set -euo pipefail
+          payload=$(jq -n --arg clear "$CLEAR_CACHE_FLAG" '{clearCache: ($clear == "true")}')
+          response=$(curl -sS -X POST "${RENDER_API_BASE}/blueprints/${RENDER_BLUEPRINT_ID}/deploys" \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # 2. END OF WORKFLOW
-  # ──────────────────────────────────────────────────────────────────────────
+          echo "API response: $response"
+          deploy_id=$(echo "$response" | jq -r '.id // empty')
+          status=$(echo "$response" | jq -r '.status // "unknown"')
+
+          if [ -z "$deploy_id" ]; then
+            echo "::error::Render API did not return a deploy id" >&2
+            exit 1
+          fi
+
+          echo "deploy_id=$deploy_id" >> "$GITHUB_OUTPUT"
+          echo "deploy_status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Post Render deploy link
+        if: always()
+        env:
+          RENDER_BLUEPRINT_ID: ${{ secrets.RENDER_BLUEPRINT_ID }}
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
+        run: |
+          echo "Render Blueprint: https://dashboard.render.com/blueprints/${RENDER_BLUEPRINT_ID}"
+          if [ -n "${DEPLOY_ID}" ]; then
+            echo "Deploy details: https://dashboard.render.com/blueprints/${RENDER_BLUEPRINT_ID}/deploys/${DEPLOY_ID}"
+          fi
+
+      - name: Notify webhook (optional)
+        if: success() && secrets.RENDER_NOTIFY_WEBHOOK != ''
+        env:
+          WEBHOOK_URL: ${{ secrets.RENDER_NOTIFY_WEBHOOK }}
+          DEPLOY_ID: ${{ steps.trigger.outputs.deploy_id }}
+          DEPLOY_STATUS: ${{ steps.trigger.outputs.deploy_status }}
+        run: |
+          set -euo pipefail
+          curl -sS -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                  --arg status "${DEPLOY_STATUS}" \
+                  --arg deploy "${DEPLOY_ID}" \
+                  --arg ref "${GITHUB_REF}" \
+                  --arg sha "${GITHUB_SHA}" \
+                  '{text: "RetailIQ Render deploy triggered", status: $status, deploy_id: $deploy, ref: $ref, sha: $sha})"

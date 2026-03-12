@@ -29,25 +29,35 @@ RetailIQ is a **planet-scale retail operations intelligence platform**. It is bu
 
 ---
 
-## 🚀 Quick Start (Production)
+## 🚀 Quick Start (Production — Render)
 
-The API is live on AWS ECS Fargate and accessible via the Application Load Balancer:
+RetailIQ runs on Render (region: Singapore) using the declarative `render.yaml` blueprint. The blueprint provisions:
+- `retailiq-api`: Docker-based web service (Gunicorn/Flask, port 5000) with the built-in `/api/v1/health` probe.
+- `retailiq-worker`: Celery worker service launched via `dockerCommand`.
+- `retailiq-db`: Managed PostgreSQL instance.
+- `retailiq-redis`: Managed Redis instance shared by caching, Celery, and rate limiting.
 
 ```bash
-# Health Check Endpoint
-curl http://retailiq-prod-alb-ap-788582259.ap-south-1.elb.amazonaws.com/api/v1/health
+# Health Check Endpoint (replace hostname with your Render URL)
+curl https://retailiq-api.onrender.com/api/v1/health
 ```
 
-**Auto-Deployment**: Merging or pushing to the `main` branch automatically triggers the `.github/workflows/deploy.yml` pipeline. The CI/CD has been optimized to run under 3 minutes using:
+**Deploy / Redeploy via CLI**
+1. `npm install -g render-cli` (one time) and `render login`.
+2. From the repo root run `render blueprint launch render.yaml --name retailiq --region singapore --apply`.
+3. Populate secrets (SECRET_KEY, JWT keys, mail creds) via the Render dashboard or mark them with `sync: false` in the blueprint for manual entry.
+4. Tail the first deployment with `render services logs retailiq-api`.
+
+**Auto-Deployment**
+
+`.github/workflows/deploy.yml` runs on every push to `main`, executing lint, security, migrations, and tests. On success, Render (connected via repo sync) rebuilds the Docker image defined by `render.yaml` and rolls it out to both services. The workflow consistently stays under 3 minutes thanks to:
 - **uv package manager** for 10x faster dependency installation
 - **Parallel test execution** with pytest-xdist
 - **Combined quality checks** (lint, security, migrations) in a single job
 - **SQLite in-memory testing** (no external services needed)
 - **Smart Python version matrix** (single version for PRs, full matrix on main)
 
-The pipeline runs 250+ tests, builds the multi-stage Docker image, pushes to Amazon ECR, and performs a zero-downtime rolling update across the three ECS services (API, Worker, Beat).
-
-For detailed AWS architecture, security, cost optimization, and CI/CD secrets setup, read the full [**AWS Deployment Guide (DEPLOYMENT.md)**](./DEPLOYMENT.md).
+Platform overrides (AWS ECS, Kubernetes, etc.) live in the appendix of [**DEPLOYMENT.md**](./DEPLOYMENT.md), but Render remains the authoritative production target.
 
 ---
 
@@ -74,7 +84,7 @@ For detailed AWS architecture, security, cost optimization, and CI/CD secrets se
 20. [Configuration and Environment Variables](#configuration-and-environment-variables)
 21. [Local Development](#local-development)
 22. [Testing Strategy](#testing-strategy)
-23. [CI/CD](#cicd)
+23. [Render Deployment & CI/CD](#render-deployment--cicd)
 24. [Operations and Troubleshooting](#operations-and-troubleshooting)
 25. [Comprehensive Developer and Engineer Guide](#comprehensive-developer-and-engineer-guide)
 26. [API Specification (OpenAPI)](#api-specification-openapi)
@@ -170,32 +180,34 @@ RetailIQ's B2B Wholesale Marketplace is a data-driven procurement platform conne
 ## Comprehensive System Architecture
 
 ### Planet-Scale Distributed Topology
-RetailIQ is evolving from a single-region ECS setup to a global, distributed architecture across 5+ regions (US-East, EU-West, AP-South, etc.).
+RetailIQ now operates primarily on **Render (Singapore region)** while continuing R&D on multi-region Kubernetes/ECS topologies for future scale. Render hosts production traffic today, so every engineer should treat the blueprint as the source of truth and use the multi-cloud diagrams as forward-looking context.
 
-#### High-level Components
-- **Global Load Balancer (CDN)**: Anycast global routing with edge caching (latency-based).
-- **Kubernetes Multi-Region (EKS/GKE)**:
-    - `api`: Flask Gunicorn app (Distroless runtime).
-    - `worker`: Distributed Celery workforce.
-    - `beat`: Highly available Celery scheduler.
-- **CockroachDB Cluster**: Multi-region distributed SQL with row-level geo-partitioning.
-- **Redis Cluster**: Global caching with local-read optimization.
-- **Kafka**: Real-time event streaming and message brokering.
+#### Render Production Architecture (2026-03-12)
+- **Blueprint**: `render.yaml` provisions two Docker services (`retailiq-api`, `retailiq-worker`) plus managed Postgres (`retailiq-db`) and Redis (`retailiq-redis`).
+- **Ingress**: Render-managed HTTPS endpoint terminates TLS and forwards traffic directly to the Flask/Gunicorn container (port 5000). Health probes hit `/api/v1/health`.
+- **Background processing**: The worker service reuses the same Docker image but overrides the command with `celery -A celery_worker.celery_app worker --loglevel=info`.
+- **Secrets**: Database and Redis URLs are injected through Render service bindings. Sensitive keys (SECRET_KEY, JWT, SMTP) rely on `sync: false` entries so they must be set in the dashboard before deploys.
+- **Operational surfaces**: Use `render services logs <service>` for live logs, `render jobs create` for one-off migrations, and the dashboard metrics for CPU/RAM insight.
+
+#### Evolutionary Architecture (Future-ready)
+- **Global Load Balancer (CDN)**: For future multi-region rollouts, an anycast CDN will front multiple Render regions or a hybrid Kubernetes mesh.
+- **Kubernetes/ECS staging**: The appendix diagrams (CockroachDB, Kafka, Loki, etc.) describe the next phase once we outgrow Render plans. Keep manifests updated but treat them as aspirational until capacity planning requires them.
+- **CockroachDB + Redis Clusters**: Remain the north star for globally consistent data, mirroring our CockroachDB lab environment and the managed Redis that Render supplies today.
+- **Streaming fabric (Kafka)**: Reserved for large-scale ingestion and ML signal broadcasting once demand necessitates it.
 
 ### Observability Stack
-- **Prometheus + Grafana**: SLA monitoring (Availability, p99 Latency, Cost/1M requests).
-- **Jaeger**: Distributed tracing across regions.
-- **Loki**: Global log aggregation.
+- **Render logs + metrics**: First stop for production incidents. Configure alerting hooks directly in the Render dashboard (or via webhook) for error-rate spikes.
+- **Prometheus + Grafana / Jaeger / Loki (lab environments)**: Continue to power deep telemetry in Kubernetes-based staging clusters so we can port the stack once multi-region goes live.
 
-#### Runtime Hierarchy
-1. **Request Ingress**: Client -> Global LB -> Regional K8s Ingress -> API Pod.
-2. **State Management**: API Pod -> Regional Redis (Cache) / Global CockroachDB (Record).
-3. **Async Processing**: API Pod -> Kafka/Redis Broker -> Celery Worker.
+#### Runtime Hierarchy (Render)
+1. **Request Ingress**: Client -> Render HTTPS edge -> `retailiq-api` container.
+2. **State Management**: API container -> managed Postgres (`retailiq-db`) / managed Redis (`retailiq-redis`).
+3. **Async Processing**: API enqueues jobs to Redis broker -> `retailiq-worker` Celery pool -> Postgres/Redis updates.
 
-#### ECS Task Startup Watchpoints
-- **Secrets delivery**: `aws/task-definitions/*.json` inject Secrets Manager ARNs for DB/Redis/JWT/mail (@aws/task-definitions/api.json#1-43). Any rotation that changes the ARN suffix requires updating the task def rendered in `.github/workflows/deploy.yml`.
-- **Network reachability**: `scripts/entrypoint.sh` blocks on `wait_for_db` + Redis-based migration locks (@scripts/entrypoint.sh#15-148). Tasks failing to reach PostgreSQL/Redis (security groups, subnets, or wrong URLs) exit before registering with the ECS service, surfacing as `TaskFailedToStart`.
-- **Health checks**: API relies on ALB `/health`; worker/beat use the dummy Python exit-0 health check defined in the task defs. If you change `healthCheck` commands, keep them lightweight to avoid ECS marking the task unhealthy during long migrations.
+#### Render Service Watchpoints
+- **Blueprint drift**: Keep `render.yaml` aligned with actual service names/regions. Any manual dashboard edits should be reflected back in Git to avoid mismatches during the next blueprint sync.
+- **Secrets hygiene**: Treat every `sync: false` variable as a deployment gate; missing JWT/mail secrets will cause boot failures on Render long before CI finishes.
+- **Health probes**: `/api/v1/health` must stay lightweight because Render restarts containers that fail probes. Integration tests should cover this endpoint whenever migrations touch database connectivity.
 
 ### Detailed Component Architecture
 ```mermaid
@@ -1364,17 +1376,17 @@ In development mode (`FLASK_ENV=development` and not `TESTING`):
 
 ---
 
-## AWS Deployment & CI/CD
+## Render Deployment & CI/CD
 
-RetailIQ is fully documented for production deployment on **AWS ECS Fargate**.
+Render is the authoritative runtime for RetailIQ. Treat `render.yaml` as the single source of truth for service topology, scaling knobs, and secret wiring.
 
-The repository includes:
-- Multi-stage `Dockerfile.prod`
-- ECS Task Definitions (`aws/task-definitions/`)
-- IAM roles and CloudWatch alarms (`aws/iam/`, `aws/cloudwatch/`)
-- Full GitHub Actions CI/CD pipeline (`.github/workflows/deploy.yml`)
+- **Blueprint-driven provisioning**: `render.yaml` defines both services plus managed Redis/Postgres. Update it whenever a new service role, env var, or scaling parameter is introduced.
+- **CI integration**: `.github/workflows/ci.yml` and `.github/workflows/deploy.yml` run lint/tests/security on every push. When `main` succeeds, Render (connected via repo sync) automatically starts a build and deployment—no separate AWS/ECR artifacts are needed.
+- **Manual deploys**: Use `render deploy retailiq-api` (and `retailiq-worker`) or trigger from the Render dashboard for hotfixes without a new commit.
+- **Secrets**: Store production secrets in Render's managed environment variables (`sync: false` entries in the blueprint). For autogenerated material such as `SECRET_KEY`, prefer `generateValue: true` to keep per-environment entropy.
+- **Scaling & observability**: Adjust instance sizes via the Render dashboard or by editing the `plan`/autoscaling keys in `render.yaml`. Logs and metrics are available directly in Render; no CloudWatch wiring is necessary.
 
-For the comprehensive step-by-step guide, including architecture diagrams, cost optimization, security hardening, and troubleshooting, see the [**AWS Deployment Guide (DEPLOYMENT.md)**](./DEPLOYMENT.md).
+Legacy AWS instructions remain in [DEPLOYMENT.md](./DEPLOYMENT.md) under Appendix A for teams that must operate their own ECS clusters.
 
 ---
 
@@ -1437,14 +1449,14 @@ The CI/CD pipeline is optimized for speed (<3 minutes) and reliability:
 For emergency hotfixes, use the `ci-fast.yml` workflow which runs critical tests only in under 2 minutes.
 
 ### 6. Deployment
-Changes merged to `main` are automatically deployed to AWS ECS. The deployment pipeline:
-1. Runs the optimized test suite
-2. Builds the production Docker image using the multi-stage Dockerfile.prod
-3. Pushes to Amazon ECR with SHA tagging
-4. Performs zero-downtime rolling updates across API, Worker, and Beat ECS services
-5. Verifies service health and sends Slack notifications
+Changes merged to `main` automatically trigger the Render blueprint deploy workflow:
+1. `.github/workflows/ci.yml` runs lint, security, and tests in parallel (under 3 minutes total runtime).
+2. `.github/workflows/deploy.yml` invokes Render's Blueprint API using `RENDER_API_KEY` + `RENDER_BLUEPRINT_ID`, optionally forcing a cache bust via the `clear_cache` input.
+3. Render rebuilds the Docker image defined in `render.yaml` and rolls the image out to `retailiq-api` and `retailiq-worker` with built-in health checks.
+4. Postgres/Redis bindings are preserved automatically because the blueprint pins service names; no manual secrets rotation is required unless you changed the keys in the dashboard.
+5. Optional Slack/Teams notifications can be driven via `RENDER_NOTIFY_WEBHOOK`.
 
-Ensure `alembic upgrade head` is part of the deployment script for schema migrations.
+For long-running migrations, launch a one-off Render job (`render jobs create --service retailiq-worker --command "alembic upgrade head"`) before the main deploy completes.
 
 ### Independent Verification Notes (2026-03-12)
 - **Alembic Checks Require Configuration**: Running `alembic check` locally fails unless `DATABASE_URL` is set (see `migrations/env.py`). Update `.env.example` or developer onboarding docs so engineers populate a Postgres URL before running schema parity commands.
@@ -1473,13 +1485,16 @@ This project is proprietary software for RetailIQ.
 RetailIQ is designed to be platform-agnostic. Choose your architecture:
 
 ### 1. Render (Recommended / One-Click)
-- **Status**: Ready for Deployment.
-- **Workflow**: Auto-provisioning via `render.yaml`.
+- **Status**: Primary production target (blueprint in repo root).
+- **Services**: `retailiq-api` (web) + `retailiq-worker` (background) with managed `retailiq-db` (Postgres) and `retailiq-redis`.
+- **Provisioning**: `render blueprint launch render.yaml --name retailiq --region singapore --apply`.
+- **Secrets**: Configure via Render dashboard or mark entries with `sync: false` or `generateValue`. `fromService.property` only supports `connectionString`, `host`, `hostport`, and `port`.
+- **Operations**: `render services logs <service>` for log streams, `render deploy <service>` for manual rollouts, and dashboard autoscaling for plan upgrades.
 - **Guide**: See [render_guide.md](file:///C:/Users/avian/.gemini/antigravity/brain/bd91a305-23dc-4afe-b0ef-3c1f07a97353/render_guide.md).
 
 ### 2. AWS (Advanced / ap-south-1)
-- **Status**: Partially Configured (VPC, RDS, Redis active).
-- **Workflow**: Manual ECS/ALB wiring required.
+- **Status**: Advanced / legacy option for self-managed ECS.
+- **Workflow**: Manual ECS/ALB wiring required; follow Appendix A in `DEPLOYMENT.md` plus `aws/task-definitions/`.
 - **Guide**: See [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ---
