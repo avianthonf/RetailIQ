@@ -33,7 +33,8 @@ from .services import ProductService
 # ──────────────────────────────────────────────────────────────
 
 
-@inventory_bp.route("/products", methods=["GET"])
+@inventory_bp.route("/", methods=["GET"])
+@inventory_bp.route("", methods=["GET"])
 @require_auth
 def list_products():
     store_id = g.current_user["store_id"]
@@ -73,7 +74,8 @@ def list_products():
     )
 
 
-@inventory_bp.route("/products", methods=["POST"])
+@inventory_bp.route("/", methods=["POST"])
+@inventory_bp.route("", methods=["POST"])
 @require_auth
 @require_role("owner")
 def create_product():
@@ -127,7 +129,7 @@ def create_product():
 # ──────────────────────────────────────────────────────────────
 
 
-@inventory_bp.route("/products/<int:product_id>", methods=["GET"])
+@inventory_bp.route("/<int:product_id>", methods=["GET"])
 @require_auth
 def get_product(product_id):
     store_id = g.current_user["store_id"]
@@ -141,7 +143,7 @@ def get_product(product_id):
     return standard_json(data=ProductSchema().dump(product))
 
 
-@inventory_bp.route("/products/<int:product_id>", methods=["PUT"])
+@inventory_bp.route("/<int:product_id>", methods=["PUT"])
 @require_auth
 def update_product(product_id):
     store_id = g.current_user["store_id"]
@@ -208,7 +210,7 @@ def update_product(product_id):
     return standard_json(data=ProductSchema().dump(product))
 
 
-@inventory_bp.route("/products/<int:product_id>", methods=["DELETE"])
+@inventory_bp.route("/<int:product_id>", methods=["DELETE"])
 @require_auth
 @require_role("owner")
 def delete_product(product_id):
@@ -229,8 +231,8 @@ def delete_product(product_id):
 # ──────────────────────────────────────────────────────────────
 
 
-@inventory_bp.route("/products/<int:product_id>/stock-update", methods=["POST"])
-@inventory_bp.route("/products/<int:product_id>/stock", methods=["POST"])
+@inventory_bp.route("/<int:product_id>/stock-update", methods=["POST"])
+@inventory_bp.route("/<int:product_id>/stock", methods=["POST"])
 @require_auth
 def stock_update(product_id):
     store_id = g.current_user["store_id"]
@@ -296,7 +298,7 @@ def stock_update(product_id):
 # ──────────────────────────────────────────────────────────────
 
 
-@inventory_bp.route("/products/stock-audit", methods=["POST"])
+@inventory_bp.route("/stock-audit", methods=["POST"])
 @inventory_bp.route("/audit", methods=["POST"])
 @require_auth
 @require_role("owner")
@@ -369,7 +371,7 @@ def stock_audit():
 # ──────────────────────────────────────────────────────────────
 
 
-@inventory_bp.route("/products/<int:product_id>/price-history", methods=["GET"])
+@inventory_bp.route("/<int:product_id>/price-history", methods=["GET"])
 @require_auth
 def price_history(product_id):
     store_id = g.current_user["store_id"]

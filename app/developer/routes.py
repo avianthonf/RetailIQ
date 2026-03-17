@@ -4,11 +4,10 @@ import bcrypt
 from flask import g, jsonify, request
 from marshmallow import Schema, ValidationError, fields
 
-from app import db, limiter
-from app.auth.decorators import require_auth
-from app.auth.utils import format_response
-from app.models import Developer, DeveloperApplication, MarketplaceApp
-
+from .. import db, limiter
+from ..auth.decorators import require_auth
+from ..auth.utils import format_response
+from ..models import Developer, DeveloperApplication, MarketplaceApp
 from . import developer_bp
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -37,10 +36,10 @@ def register_developer():
     try:
         data = DeveloperRegisterSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": err.messages})
 
     if db.session.query(Developer).filter_by(email=data["email"]).first():
-        return format_response(False, error={"code": "DUPLICATE_EMAIL", "message": "Email already registered"}), 400
+        return format_response(success=False, error={"code": "DUPLICATE_EMAIL", "message": "Email already registered"})
 
     new_dev = Developer(name=data["name"], email=data["email"], organization=data.get("organization"))
     db.session.add(new_dev)
@@ -54,7 +53,8 @@ def register_developer():
             "email": new_dev.email,
             "message": "Developer registered successfully.",
         },
-    ), 201
+        status_code=201,
+    )
 
 
 @developer_bp.route("/apps", methods=["POST"])
@@ -64,7 +64,7 @@ def create_app():
     try:
         data = AppCreateSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": err.messages})
 
     # Find the developer linked to current user
     user_id = g.current_user["user_id"]
@@ -106,7 +106,8 @@ def create_app():
             "name": new_app.name,
             "scopes": new_app.scopes,
         },
-    ), 201
+        status_code=201,
+    )
 
 
 @developer_bp.route("/apps", methods=["GET"])
@@ -116,13 +117,13 @@ def list_apps():
     user_id = g.current_user["user_id"]
     developer = db.session.query(Developer).filter_by(user_id=user_id).first()
     if not developer:
-        return format_response(True, data=[]), 200
+        return format_response(success=True, data=[])
 
     apps = db.session.query(DeveloperApplication).filter_by(developer_id=developer.id).all()
     return format_response(
         True,
         data=[{"id": a.id, "name": a.name, "client_id": a.client_id, "status": a.status, "tier": a.tier} for a in apps],
-    ), 200
+    )
 
 
 @developer_bp.route("/marketplace", methods=["GET"])
@@ -143,4 +144,4 @@ def list_marketplace():
             }
             for a in apps
         ],
-    ), 200
+    )

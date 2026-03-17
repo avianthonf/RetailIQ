@@ -134,13 +134,13 @@ def test_demand_sensing_error_paths(client, owner_headers, monkeypatch):
     resp = client.get("/api/v1/forecasting/demand-sensing/9999", headers=owner_headers)
     assert resp.status_code == 404
 
-    # Forecast error (Exception)
-    from app.events import routes
+    # Forecast error (Exception) — monkeypatch the engine module directly
+    from app.forecasting import engine as fc_engine
 
     def mock_error(*args, **kwargs):
         raise Exception("Forecast failed")
 
-    monkeypatch.setattr(routes, "generate_demand_forecast", mock_error)
+    monkeypatch.setattr(fc_engine, "generate_demand_forecast", mock_error)
 
     # Need a real product ID to pass the first check
     from app.models import Product

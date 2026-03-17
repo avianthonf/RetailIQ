@@ -33,7 +33,9 @@ def chain_group(app, test_owner, test_store):
     db.session.add(group)
     db.session.commit()
     # Re-generate token so chain_group_id is injected
-    token = generate_access_token(test_owner.user_id, test_store.store_id, "owner")
+    token = generate_access_token(
+        test_owner.user_id, test_store.store_id, "owner", chain_group_id=str(group.id), chain_role="CHAIN_OWNER"
+    )
     headers = {"Authorization": f"Bearer {token}"}
     return group, headers
 

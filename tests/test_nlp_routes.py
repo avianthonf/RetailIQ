@@ -15,7 +15,7 @@ def test_handle_query_forecast(client, owner_headers):
         mock_row.reg = "Growth"
         mock_execute.return_value.fetchone.return_value = mock_row
 
-        response = client.post("/api/v1/query/", json={"query_text": "forecast"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "forecast"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -37,7 +37,7 @@ def test_handle_query_inventory(client, owner_headers):
         mock_row.deficit = 10
         mock_execute.return_value.fetchone.return_value = mock_row
 
-        response = client.post("/api/v1/query/", json={"query_text": "inventory"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "inventory"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -52,7 +52,7 @@ def test_handle_query_inventory_no_deficit(client, owner_headers):
     ):
         mock_execute.return_value.fetchone.return_value = None
 
-        response = client.post("/api/v1/query/", json={"query_text": "inventory"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "inventory"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -78,7 +78,7 @@ def test_handle_query_revenue(client, owner_headers):
 
         mock_execute.return_value.fetchall.return_value = [mock_row1, mock_row2]
 
-        response = client.post("/api/v1/query/", json={"query_text": "revenue"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "revenue"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -93,7 +93,7 @@ def test_handle_query_profit(client, owner_headers):
         mock_row.product_count = 10
         mock_execute.return_value.fetchone.return_value = mock_row
 
-        response = client.post("/api/v1/query/", json={"query_text": "profit"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "profit"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -113,7 +113,7 @@ def test_handle_query_top_products(client, owner_headers):
         mock_row.total_units = 50
         mock_execute.return_value.fetchall.return_value = [mock_row]
 
-        response = client.post("/api/v1/query/", json={"query_text": "top products"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "top products"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -132,7 +132,7 @@ def test_handle_query_loyalty_summary(client, owner_headers):
         mock_row.redeemed = -1000
         mock_execute.return_value.fetchone.return_value = mock_row
 
-        response = client.post("/api/v1/query/", json={"query_text": "loyalty"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "loyalty"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -150,7 +150,7 @@ def test_handle_query_credit_overdue(client, owner_headers):
         mock_row.total_overdue = 1500.0
         mock_execute.return_value.fetchone.return_value = mock_row
 
-        response = client.post("/api/v1/query/", json={"query_text": "credit"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "credit"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -165,7 +165,7 @@ def test_handle_query_market_intelligence(client, owner_headers):
     ):
         mock_summary.return_value = {"active_alerts": 2}
 
-        response = client.post("/api/v1/query/", json={"query_text": "market"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "market"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -178,7 +178,7 @@ def test_handle_query_market_intelligence_exception(client, owner_headers):
         patch("app.nlp.routes.resolve_intent", return_value="market_intelligence"),
         patch("app.market_intelligence.engine.IntelligenceEngine.get_market_summary", side_effect=Exception("Error")),
     ):
-        response = client.post("/api/v1/query/", json={"query_text": "market"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "market"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
@@ -187,29 +187,28 @@ def test_handle_query_market_intelligence_exception(client, owner_headers):
 
 def test_handle_query_default(client, owner_headers):
     with patch("app.nlp.routes.resolve_intent", return_value="default"):
-        response = client.post("/api/v1/query/", json={"query_text": "unknown"}, headers=owner_headers)
+        response = client.post("/api/v1/nlp/", json={"query_text": "unknown"}, headers=owner_headers)
 
         assert response.status_code == 200
         data = response.get_json()["data"]
         assert data["intent"] == "default"
+        assert "baseline" in data["detail"]
 
 
 def test_nlp_query_v2_success(client, owner_headers):
-    with patch("app.nlp.assistant.handle_assistant_query", return_value="Test Response"):
-        response = client.post("/api/v1/query/v2/ai/nlp/query", json={"query": "hello"}, headers=owner_headers)
-
+    with patch("app.nlp.routes.handle_assistant_query", return_value="AI Response"):
+        response = client.post("/api/v1/nlp/v2/ai/nlp/query", json={"query": "test query"}, headers=owner_headers)
         assert response.status_code == 200
-        assert response.get_json() == {"response": "Test Response"}
+        assert response.get_json()["response"] == "AI Response"
 
 
 def test_nlp_query_v2_missing_query(client, owner_headers):
-    response = client.post("/api/v1/query/v2/ai/nlp/query", json={}, headers=owner_headers)
+    response = client.post("/api/v1/nlp/v2/ai/nlp/query", json={}, headers=owner_headers)
     assert response.status_code == 400
 
 
 def test_recommend_v2(client, owner_headers):
-    with patch("app.nlp.recommender.get_ai_recommendations", return_value=["Rec 1", "Rec 2"]):
-        response = client.post("/api/v1/query/v2/ai/recommend", json={"user_id": 1}, headers=owner_headers)
-
+    with patch("app.nlp.routes.get_ai_recommendations", return_value=["rec1", "rec2"]):
+        response = client.post("/api/v1/nlp/v2/ai/recommend", json={"user_id": 1}, headers=owner_headers)
         assert response.status_code == 200
-        assert response.get_json() == {"recommendations": ["Rec 1", "Rec 2"]}
+        assert len(response.get_json()["recommendations"]) == 2

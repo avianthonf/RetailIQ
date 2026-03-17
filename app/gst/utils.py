@@ -1,50 +1,34 @@
-"""
-GSTIN validation utility.
-
-Indian GSTIN structure (15 characters):
-  [0-1]  State code (01-37)
-  [2-11] PAN (10 chars: 5 alpha + 4 digits + 1 alpha)
-  [12]   Entity number (1-9 or A-Z)
-  [13]   'Z' (default)
-  [14]   Checksum (modulo-36 based)
-"""
+"""RetailIQ GST Utilities."""
 
 import re
 
-_GSTIN_RE = re.compile(r"^[0-3][0-9][A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$")
-
-_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-
-def _char_value(ch: str) -> int:
-    return _CHARSET.index(ch)
-
 
 def validate_gstin(gstin: str) -> bool:
-    """Validate a 15-character Indian GSTIN with modulo-36 checksum."""
+    """
+    Validate Indian GSTIN format and checksum.
+    Format: 2-digit state code + 10-char PAN + 1 entity number + Z + 1 checksum
+    Example: 29ABCDE1234F1Z5
+    """
     if not gstin or len(gstin) != 15:
         return False
 
+    pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$"
+    if not re.match(pattern, gstin.upper()):
+        return False
+
+    # Checksum validation using mod-36 Luhn-variant
     gstin = gstin.upper()
-    if not _GSTIN_RE.match(gstin):
-        return False
-
-    # State code validation (01-37)
-    state_code = int(gstin[:2])
-    if state_code < 1 or state_code > 37:
-        return False
-
-    # Modulo-36 checksum (Luhn-like, as used in Indian GSTIN spec)
+    chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    factor = 1
     total = 0
-    for i, ch in enumerate(gstin[:14]):
-        val = _char_value(ch)
-        if i % 2 != 0:
-            val *= 2
-        # Carry: sum of quotient and remainder when divided by 36
-        total += val // 36 + val % 36
+    for i, char in enumerate(gstin[:-1]):
+        code_point = chars.index(char)
+        addend = factor * code_point
+        factor = 2 if factor == 1 else 1
+        addend = (addend // 36) + (addend % 36)
+        total += addend
 
     remainder = total % 36
-    check_val = (36 - remainder) % 36
-    expected_char = _CHARSET[check_val]
-
-    return gstin[14] == expected_char
+    check_code_point = (36 - remainder) % 36
+    expected_checksum = chars[check_code_point]
+    return gstin[-1] == expected_checksum

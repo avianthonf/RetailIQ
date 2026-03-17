@@ -15,17 +15,17 @@ class LedgerError(Exception):
     pass
 
 
-def get_or_create_account(store_id: int, account_type: str, account_name: str | None = None) -> FinancialAccount:
+def get_or_create_account(store_id: int, account_type: str, bank_name: str | None = None) -> FinancialAccount:
     """Get an existing financial account or create a new one for a store."""
     account = db.session.execute(
         select(FinancialAccount).filter_by(store_id=store_id, account_type=account_type)
     ).scalar_one_or_none()
 
     if not account:
-        if not account_name:
-            account_name = f"{account_type.title()} Account"
+        if not bank_name:
+            bank_name = f"{account_type.title()} Account"
 
-        account = FinancialAccount(store_id=store_id, account_type=account_type, account_name=account_name, balance=0)
+        account = FinancialAccount(store_id=store_id, account_type=account_type, bank_name=bank_name, balance=0)
         db.session.add(account)
         db.session.flush()  # Get ID without committing
 
@@ -65,22 +65,28 @@ def record_transaction(
 
     # 2. Create ledger entries
     debit_entry = LedgerEntry(
-        transaction_id=txn_id,
+        reference_id=str(txn_id),
+        reference_type="DOUBLE_ENTRY",
         account_id=debit_account.id,
         entry_type="DEBIT",
         amount=amount,
+        balance_after=float(
+            debit_account.balance + (amount if debit_account_type in ("OPERATING", "RESERVE") else -amount)
+        ),
         description=description,
-        meta_data=meta_data,
         created_at=now,
     )
 
     credit_entry = LedgerEntry(
-        transaction_id=txn_id,
+        reference_id=str(txn_id),
+        reference_type="DOUBLE_ENTRY",
         account_id=credit_account.id,
         entry_type="CREDIT",
         amount=amount,
+        balance_after=float(
+            credit_account.balance + (-amount if credit_account_type in ("OPERATING", "RESERVE") else amount)
+        ),
         description=description,
-        meta_data=meta_data,
         created_at=now,
     )
 

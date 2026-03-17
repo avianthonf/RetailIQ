@@ -3,28 +3,19 @@ Barcode & Receipt Printing Blueprint — Routes
 
 All endpoints require JWT authentication via @require_auth.
 Store scoping is applied by reading store_id from the JWT payload (g.current_user).
-
-Endpoints:
-  GET  /api/v1/receipts/template         — fetch store receipt template
-  PUT  /api/v1/receipts/template         — upsert store receipt template
-  POST /api/v1/receipts/print            — create a print job
-  GET  /api/v1/receipts/print/<job_id>   — poll print job status
-  GET  /api/v1/barcodes/lookup           — lookup barcode value -> product
-  POST /api/v1/barcodes                  — register a barcode
-  GET  /api/v1/barcodes                  — list barcodes for a product
 """
 
 import re
 import uuid as uuid_module
 from datetime import datetime, timezone
 
-from flask import g, request
+from flask import Blueprint, g, request
 
 from .. import db
 from ..auth.decorators import require_auth
-from ..auth.utils import format_response
 from ..models import Barcode, PrintJob, Product, ReceiptTemplate, Transaction
-from . import receipts_bp
+from ..utils.responses import standard_json
+from . import barcode_bp, receipts_bp
 from .formatter import build_receipt_payload
 
 # ---------------------------------------------------------------------------
@@ -42,7 +33,7 @@ def _validate_barcode_value(value: str) -> bool:
 # ===========================================================================
 
 
-@receipts_bp.route("/receipts/template", methods=["GET"])
+@receipts_bp.route("/template", methods=["GET"])
 @require_auth
 def get_receipt_template():
     """Return the store's receipt template, or sensible defaults if none set."""
@@ -67,53 +58,43 @@ def get_receipt_template():
             "store_id": store_id,
             "header_text": "",
             "footer_text": "Thank you for shopping with us!",
-            "show_gstin": False,
+            "show_gstin": True,
             "paper_width_mm": 80,
             "updated_at": None,
         }
+    return standard_json(True, data=data), 200
 
-    return format_response(True, data=data), 200
 
-
-@receipts_bp.route("/receipts/template", methods=["PUT"])
+@receipts_bp.route("/template", methods=["PUT"])
 @require_auth
 def upsert_receipt_template():
-    """Upsert receipt template for the authenticated store."""
+    """Create or update the store's receipt template."""
     store_id = g.current_user["store_id"]
     body = request.get_json(silent=True) or {}
 
     template = db.session.query(ReceiptTemplate).filter_by(store_id=store_id).first()
-    if template is None:
+    if not template:
         template = ReceiptTemplate(store_id=store_id)
         db.session.add(template)
 
-    if "header_text" in body:
-        template.header_text = body["header_text"]
-    if "footer_text" in body:
-        template.footer_text = body["footer_text"]
-    if "show_gstin" in body:
-        template.show_gstin = bool(body["show_gstin"])
-    if "paper_width_mm" in body:
-        try:
-            template.paper_width_mm = int(body["paper_width_mm"])
-        except (TypeError, ValueError):
-            return format_response(
-                False, error={"code": "VALIDATION_ERROR", "message": "paper_width_mm must be an integer"}
-            ), 422
-
+    template.header_text = body.get("header_text", template.header_text)
+    template.footer_text = body.get("footer_text", template.footer_text)
+    template.show_gstin = body.get("show_gstin", template.show_gstin)
+    template.paper_width_mm = body.get("paper_width_mm", template.paper_width_mm)
     template.updated_at = datetime.now(timezone.utc)
+
     db.session.commit()
 
     data = {
         "id": template.id,
         "store_id": store_id,
-        "header_text": template.header_text or "",
-        "footer_text": template.footer_text or "",
+        "header_text": template.header_text,
+        "footer_text": template.footer_text,
         "show_gstin": template.show_gstin,
         "paper_width_mm": template.paper_width_mm,
-        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+        "updated_at": template.updated_at.isoformat(),
     }
-    return format_response(True, data=data), 200
+    return standard_json(True, data=data), 200
 
 
 # ===========================================================================
@@ -121,7 +102,7 @@ def upsert_receipt_template():
 # ===========================================================================
 
 
-@receipts_bp.route("/receipts/print", methods=["POST"])
+@receipts_bp.route("/print", methods=["POST"])
 @require_auth
 def create_print_job():
     """
@@ -141,13 +122,13 @@ def create_print_job():
         try:
             transaction_id = uuid_module.UUID(str(transaction_id))
         except (ValueError, AttributeError):
-            return format_response(
+            return standard_json(
                 False, error={"code": "VALIDATION_ERROR", "message": "transaction_id must be a valid UUID"}
             ), 422
 
         txn = db.session.query(Transaction).filter_by(transaction_id=transaction_id, store_id=store_id).first()
         if not txn:
-            return format_response(False, error={"code": "NOT_FOUND", "message": "Transaction not found"}), 404
+            return standard_json(False, error={"code": "NOT_FOUND", "message": "Transaction not found"}), 404
 
     # Build receipt payload if transaction_id provided
     receipt_payload = None
@@ -155,7 +136,7 @@ def create_print_job():
         try:
             receipt_payload = build_receipt_payload(transaction_id, store_id, db.session)
         except ValueError as e:
-            return format_response(False, error={"code": "NOT_FOUND", "message": str(e)}), 404
+            return standard_json(False, error={"code": "NOT_FOUND", "message": str(e)}), 404
 
     job = PrintJob(
         store_id=store_id,
@@ -171,10 +152,10 @@ def create_print_job():
     db.session.add(job)
     db.session.commit()
 
-    return format_response(True, data={"job_id": job.id}), 201
+    return standard_json(True, data={"job_id": job.id}), 201
 
 
-@receipts_bp.route("/receipts/print/<int:job_id>", methods=["GET"])
+@receipts_bp.route("/print/<int:job_id>", methods=["GET"])
 @require_auth
 def get_print_job_status(job_id):
     """Poll the status of a print job."""
@@ -182,7 +163,7 @@ def get_print_job_status(job_id):
 
     job = db.session.query(PrintJob).filter_by(id=job_id, store_id=store_id).first()
     if not job:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Print job not found"}), 404
+        return standard_json(False, error={"code": "NOT_FOUND", "message": "Print job not found"}), 404
 
     data = {
         "job_id": job.id,
@@ -193,7 +174,7 @@ def get_print_job_status(job_id):
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
     }
-    return format_response(True, data=data), 200
+    return standard_json(True, data=data), 200
 
 
 # ===========================================================================
@@ -201,7 +182,7 @@ def get_print_job_status(job_id):
 # ===========================================================================
 
 
-@receipts_bp.route("/barcodes/lookup", methods=["GET"])
+@barcode_bp.route("/lookup", methods=["GET"])
 @require_auth
 def barcode_lookup():
     """
@@ -212,7 +193,7 @@ def barcode_lookup():
     barcode_value = request.args.get("value", "").strip()
 
     if not barcode_value:
-        return format_response(
+        return standard_json(
             False, error={"code": "VALIDATION_ERROR", "message": "Query param 'value' is required"}
         ), 422
 
@@ -224,7 +205,7 @@ def barcode_lookup():
     )
 
     if not row:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Barcode not found"}), 404
+        return standard_json(False, error={"code": "NOT_FOUND", "message": "Barcode not found"}), 404
 
     barcode, product = row
     data = {
@@ -235,10 +216,10 @@ def barcode_lookup():
         "current_stock": float(product.current_stock) if product.current_stock is not None else 0.0,
         "price": float(product.selling_price) if product.selling_price is not None else 0.0,
     }
-    return format_response(True, data=data), 200
+    return standard_json(True, data=data), 200
 
 
-@receipts_bp.route("/barcodes", methods=["POST"])
+@barcode_bp.route("/register", methods=["POST"])
 @require_auth
 def register_barcode():
     """
@@ -254,10 +235,10 @@ def register_barcode():
 
     # Validate required fields
     if not product_id:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": "product_id is required"}), 422
+        return standard_json(False, error={"code": "VALIDATION_ERROR", "message": "product_id is required"}), 422
 
     if not barcode_value or not _validate_barcode_value(str(barcode_value)):
-        return format_response(
+        return standard_json(
             False,
             error={
                 "code": "VALIDATION_ERROR",
@@ -268,12 +249,12 @@ def register_barcode():
     # Verify product belongs to the store
     product = db.session.query(Product).filter_by(product_id=product_id, store_id=store_id).first()
     if not product:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Product not found in this store"}), 404
+        return standard_json(False, error={"code": "NOT_FOUND", "message": "Product not found in this store"}), 404
 
     # Check for duplicate barcode_value
     existing = db.session.query(Barcode).filter_by(barcode_value=barcode_value).first()
     if existing:
-        return format_response(False, error={"code": "CONFLICT", "message": "Barcode value already registered"}), 409
+        return standard_json(False, error={"code": "CONFLICT", "message": "Barcode value already registered"}), 409
 
     barcode = Barcode(
         product_id=product_id,
@@ -285,7 +266,7 @@ def register_barcode():
     db.session.add(barcode)
     db.session.commit()
 
-    return format_response(
+    return standard_json(
         True,
         data={
             "id": barcode.id,
@@ -298,7 +279,7 @@ def register_barcode():
     ), 201
 
 
-@receipts_bp.route("/barcodes", methods=["GET"])
+@barcode_bp.route("/list", methods=["GET"])
 @require_auth
 def list_barcodes():
     """
@@ -309,14 +290,14 @@ def list_barcodes():
     product_id = request.args.get("product_id")
 
     if not product_id:
-        return format_response(
+        return standard_json(
             False, error={"code": "VALIDATION_ERROR", "message": "Query param 'product_id' is required"}
         ), 422
 
     # Verify product belongs to the store
     product = db.session.query(Product).filter_by(product_id=product_id, store_id=store_id).first()
     if not product:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Product not found in this store"}), 404
+        return standard_json(False, error={"code": "NOT_FOUND", "message": "Product not found in this store"}), 404
 
     barcodes = db.session.query(Barcode).filter_by(product_id=product_id, store_id=store_id).all()
 
@@ -329,4 +310,4 @@ def list_barcodes():
         }
         for b in barcodes
     ]
-    return format_response(True, data=data), 200
+    return standard_json(True, data=data), 200

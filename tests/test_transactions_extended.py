@@ -47,7 +47,7 @@ def transactions_data(app, test_store, test_owner, test_staff, test_product):
 
 
 def test_create_transaction_validation_error(client, owner_headers):
-    resp = client.post("/api/v1/transactions", json={"invalid": "data"}, headers=owner_headers)
+    resp = client.post("/api/v1/transactions/", json={"invalid": "data"}, headers=owner_headers)
     assert resp.status_code == 422
 
 
@@ -60,7 +60,7 @@ def test_create_transaction_staff_session(client, test_product, staff_headers, t
         "payment_mode": "CASH",
         "line_items": [{"product_id": test_product.product_id, "quantity": 1.0, "selling_price": 10.0}],
     }
-    resp = client.post("/api/v1/transactions", json=payload, headers=staff_headers)
+    resp = client.post("/api/v1/transactions/", json=payload, headers=staff_headers)
     assert resp.status_code == 201
 
     txn = db.session.get(Transaction, uuid.UUID(txn_id))
@@ -68,26 +68,26 @@ def test_create_transaction_staff_session(client, test_product, staff_headers, t
 
 
 def test_create_batch_validation_error(client, owner_headers):
-    resp = client.post("/api/v1/transactions/batch", json={"transactions": "not a list"}, headers=owner_headers)
+    resp = client.post("/api/v1/transactions/batch/", json={"transactions": "not a list"}, headers=owner_headers)
     assert resp.status_code == 422
 
 
 def test_get_transactions_filters(client, owner_headers, transactions_data):
     # Test filtering by payment_mode
-    resp = client.get("/api/v1/transactions?payment_mode=CARD", headers=owner_headers)
+    resp = client.get("/api/v1/transactions/?payment_mode=CARD", headers=owner_headers)
     assert resp.status_code == 200
     for txn in resp.json["data"]:
         assert txn["payment_mode"] == "CARD"
 
     # Test filtering by amount
-    resp = client.get("/api/v1/transactions?min_amount=250&max_amount=450", headers=owner_headers)
+    resp = client.get("/api/v1/transactions/?min_amount=250&max_amount=450", headers=owner_headers)
     assert resp.status_code == 200
     # The totals in our mock data are 100, 200, 300, 400, 500
     assert len(resp.json["data"]) == 2  # 300 and 400
 
     # Test date filtering
     today = datetime.now(timezone.utc).date().isoformat()
-    resp = client.get(f"/api/v1/transactions?start_date={today}", headers=owner_headers)
+    resp = client.get(f"/api/v1/transactions/?start_date={today}", headers=owner_headers)
     assert resp.status_code == 200
     assert len(resp.json["data"]) >= 1
 
@@ -139,7 +139,7 @@ def test_create_batch_staff_session(client, test_product, staff_headers, transac
             }
         ]
     }
-    resp = client.post("/api/v1/transactions/batch", json=payload, headers=staff_headers)
+    resp = client.post("/api/v1/transactions/batch/", json=payload, headers=staff_headers)
     assert resp.status_code == 200
 
     txn_id = uuid.UUID(payload["transactions"][0]["transaction_id"])
@@ -150,7 +150,7 @@ def test_create_batch_staff_session(client, test_product, staff_headers, transac
 def test_get_transactions_more_filters(client, owner_headers, transactions_data):
     # Test end_date and customer_id
     today = datetime.now(timezone.utc).date().isoformat()
-    resp = client.get(f"/api/v1/transactions?end_date={today}&customer_id=99", headers=owner_headers)
+    resp = client.get(f"/api/v1/transactions/?end_date={today}&customer_id=99", headers=owner_headers)
     assert resp.status_code == 200
 
 
@@ -182,7 +182,7 @@ def test_create_transaction_error_paths(client, owner_headers, monkeypatch):
         "payment_mode": "CASH",
         "line_items": [{"product_id": 1, "quantity": 1.0, "selling_price": 10.0}],
     }
-    resp = client.post("/api/v1/transactions", json=payload, headers=owner_headers)
+    resp = client.post("/api/v1/transactions/", json=payload, headers=owner_headers)
     assert resp.status_code == 422
     assert "Credit limit" in resp.json["message"]
 
@@ -191,7 +191,7 @@ def test_create_transaction_error_paths(client, owner_headers, monkeypatch):
         raise Exception("Unexpected error")
 
     monkeypatch.setattr(routes, "process_single_transaction", mock_server_error)
-    resp = client.post("/api/v1/transactions", json=payload, headers=owner_headers)
+    resp = client.post("/api/v1/transactions/", json=payload, headers=owner_headers)
     assert resp.status_code == 500
 
 

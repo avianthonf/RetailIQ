@@ -98,7 +98,7 @@ def test_einvoice_adapters_submission():
 
 
 def test_base_einvoice_adapter_not_implemented():
-    adapter = BaseEInvoiceAdapter(store_id=1)
+    adapter = BaseEInvoiceAdapter(country_code="XX", store_id=1)
     with pytest.raises(NotImplementedError):
         adapter.generate_invoice(None)
     with pytest.raises(NotImplementedError):
@@ -109,7 +109,7 @@ def test_generate_einvoice_route_success(client, owner_headers, test_transaction
     from app import db
 
     response = client.post(
-        "/api/v1/einvoice/generate",
+        "/api/v2/einvoice/generate",
         json={"transaction_id": str(test_transaction.transaction_id), "country_code": "BR"},
         headers=owner_headers,
     )
@@ -129,14 +129,14 @@ def test_generate_einvoice_route_success(client, owner_headers, test_transaction
 def test_generate_einvoice_route_existing(client, owner_headers, test_transaction):
     # First submit successfully
     client.post(
-        "/api/v1/einvoice/generate",
+        "/api/v2/einvoice/generate",
         json={"transaction_id": str(test_transaction.transaction_id), "country_code": "BR"},
         headers=owner_headers,
     )
 
     # Try again, should return existing
     response2 = client.post(
-        "/api/v1/einvoice/generate",
+        "/api/v2/einvoice/generate",
         json={"transaction_id": str(test_transaction.transaction_id), "country_code": "BR"},
         headers=owner_headers,
     )
@@ -149,14 +149,14 @@ def test_generate_einvoice_route_existing(client, owner_headers, test_transactio
 
 
 def test_generate_einvoice_route_missing_fields(client, owner_headers):
-    response = client.post("/api/v1/einvoice/generate", json={}, headers=owner_headers)
+    response = client.post("/api/v2/einvoice/generate", json={}, headers=owner_headers)
     assert response.status_code == 400
     assert "VALIDATION_ERROR" in response.get_json()["error"]["code"]
 
 
 def test_generate_einvoice_route_txn_not_found(client, owner_headers):
     response = client.post(
-        "/api/v1/einvoice/generate",
+        "/api/v2/einvoice/generate",
         json={"transaction_id": str(uuid.uuid4()), "country_code": "ID"},
         headers=owner_headers,
     )
@@ -166,7 +166,7 @@ def test_generate_einvoice_route_txn_not_found(client, owner_headers):
 
 def test_generate_einvoice_route_invalid_country(client, owner_headers, test_transaction):
     response = client.post(
-        "/api/v1/einvoice/generate",
+        "/api/v2/einvoice/generate",
         json={"transaction_id": str(test_transaction.transaction_id), "country_code": "INVALID_COUNTRY"},
         headers=owner_headers,
     )
@@ -177,7 +177,7 @@ def test_generate_einvoice_route_invalid_country(client, owner_headers, test_tra
 def test_generate_einvoice_route_exception(client, owner_headers, test_transaction):
     with patch("app.einvoicing.routes.get_einvoice_adapter", side_effect=Exception("Server failure")):
         response = client.post(
-            "/api/v1/einvoice/generate",
+            "/api/v2/einvoice/generate",
             json={"transaction_id": str(test_transaction.transaction_id), "country_code": "BR"},
             headers=owner_headers,
         )
@@ -201,7 +201,7 @@ def test_get_einvoice_status_success(client, owner_headers, test_transaction, te
     db.session.add(einvoice)
     db.session.commit()
 
-    response = client.get(f"/api/v1/einvoice/status/{einvoice.id}", headers=owner_headers)
+    response = client.get(f"/api/v2/einvoice/status/{einvoice.id}", headers=owner_headers)
     assert response.status_code == 200
     data = response.get_json()["data"]
     assert data["status"] == "ACCEPTED"
@@ -209,6 +209,6 @@ def test_get_einvoice_status_success(client, owner_headers, test_transaction, te
 
 
 def test_get_einvoice_status_not_found(client, owner_headers):
-    response = client.get("/api/v1/einvoice/status/9999", headers=owner_headers)
+    response = client.get("/api/v2/einvoice/status/9999", headers=owner_headers)
     assert response.status_code == 404
     assert "NOT_FOUND" in response.get_json()["error"]["code"]

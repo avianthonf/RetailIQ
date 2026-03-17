@@ -25,7 +25,7 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-@vision_bp.route("/api/v1/vision/ocr/upload", methods=["POST"])
+@vision_bp.route("/ocr/upload", methods=["POST"])
 @require_auth
 @limiter.limit("20/hour", key_func=_store_key_func)
 def upload_invoice():
@@ -68,7 +68,7 @@ def upload_invoice():
     return jsonify({"job_id": str(job_uuid)}), 201
 
 
-@vision_bp.route("/api/v1/vision/ocr/<uuid:job_id>", methods=["GET"])
+@vision_bp.route("/ocr/<uuid:job_id>", methods=["GET"])
 @require_auth
 def get_job_status(job_id):
     user = g.current_user
@@ -104,7 +104,7 @@ def get_job_status(job_id):
     ), 200
 
 
-@vision_bp.route("/api/v1/vision/ocr/<uuid:job_id>/confirm", methods=["POST"])
+@vision_bp.route("/ocr/<uuid:job_id>/confirm", methods=["POST"])
 @require_auth
 def confirm_job(job_id):
     from decimal import Decimal
@@ -170,7 +170,7 @@ def confirm_job(job_id):
         return jsonify({"message": "An error occurred during confirmation"}), 500
 
 
-@vision_bp.route("/api/v1/vision/ocr/<uuid:job_id>/dismiss", methods=["POST"])
+@vision_bp.route("/ocr/<uuid:job_id>/dismiss", methods=["POST"])
 @require_auth
 def dismiss_job(job_id):
     user = g.current_user
@@ -190,7 +190,7 @@ def dismiss_job(job_id):
 # ── V2 AI Vision API ──────────────────────────────────────────────────────────
 
 
-@vision_bp.route("/v2/ai/vision/shelf-scan", methods=["POST"])
+@vision_bp.route("/shelf-scan", methods=["POST"])
 @require_auth
 def shelf_scan_v2():
     """
@@ -207,7 +207,7 @@ def shelf_scan_v2():
     return jsonify(result), 200
 
 
-@vision_bp.route("/v2/ai/vision/receipt", methods=["POST"])
+@vision_bp.route("/receipt", methods=["POST"])
 @require_auth
 def receipt_v2():
     """

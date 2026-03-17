@@ -1,14 +1,19 @@
-from flask import Blueprint, jsonify, request
+from flask import jsonify, request
 from sqlalchemy import text
 
 from app import db
 from app.auth.decorators import require_auth
+from app.nlp import nlp_bp
 from app.nlp.router import resolve_intent
 from app.nlp.templates import TEMPLATES, format_currency, format_percentage, format_unit
 
-nlp_bp = Blueprint("nlp", __name__)
+# Lazy imports for AI engines to avoid circular dependencies where possible
+# but kept at module level for test patching stability.
+from .assistant import handle_assistant_query
+from .recommender import get_ai_recommendations
 
 
+@nlp_bp.route("", methods=["POST"])
 @nlp_bp.route("/", methods=["POST"])
 @require_auth
 def handle_query():
@@ -242,8 +247,6 @@ def nlp_query_v2():
     if not query_text:
         return jsonify({"message": "query is required"}), 400
 
-    from .assistant import handle_assistant_query
-
     response = handle_assistant_query(query_text, store_id)
     return jsonify({"response": response}), 200
 
@@ -256,8 +259,6 @@ def recommend_v2():
     store_id = g.current_user["store_id"]
     data = request.json or {}
     user_id = data.get("user_id")  # Optional fallback
-
-    from .recommender import get_ai_recommendations
 
     recs = get_ai_recommendations(user_id, store_id)
     return jsonify({"recommendations": recs}), 200

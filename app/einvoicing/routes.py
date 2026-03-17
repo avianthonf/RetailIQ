@@ -15,7 +15,7 @@ from . import einvoicing_bp
 from .engine import get_einvoice_adapter
 
 
-@einvoicing_bp.route("/einvoice/generate", methods=["POST"])
+@einvoicing_bp.route("/generate", methods=["POST"])
 @require_auth
 def generate_einvoice():
     """Generate and submit an e-invoice for a completed transaction."""
@@ -24,8 +24,9 @@ def generate_einvoice():
         transaction_id = data["transaction_id"]
         country_code = data.get("country_code", "IN")
     except KeyError as e:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": f"Missing field {e}"}), 400
-
+        return format_response(
+            success=False, status_code=400, error={"code": "VALIDATION_ERROR", "message": f"Missing field {e}"}
+        )
     store_id = g.current_user["store_id"]
 
     txn = None
@@ -38,8 +39,9 @@ def generate_einvoice():
         pass  # Invalid UUID
 
     if not txn:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Transaction not found"}), 404
-
+        return format_response(
+            success=False, status_code=404, error={"code": "NOT_FOUND", "message": "Transaction not found"}
+        )
     # Check if invoice already exists
     existing = db.session.query(EInvoice).filter_by(transaction_id=parsed_txn_id, country_code=country_code).first()
 
@@ -51,8 +53,7 @@ def generate_einvoice():
                 "invoice_number": existing.invoice_number,
                 "qr_code_data": existing.qr_code_data,
             },
-        ), 200
-
+        )
     try:
         adapter = get_einvoice_adapter(country_code, store_id)
 
@@ -92,16 +93,15 @@ def generate_einvoice():
                 "authority_ref": invoice.authority_ref,
                 "qr_code_url": invoice.qr_code_data,
             },
-        ), 200
-
+        )
     except ValueError as e:
-        return format_response(False, error={"code": "ADAPTER_ERROR", "message": str(e)}), 400
+        return format_response(success=False, error={"code": "ADAPTER_ERROR", "message": str(e)})
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return format_response(success=False, status_code=500, error={"code": "SERVER_ERROR", "message": str(e)})
 
 
-@einvoicing_bp.route("/einvoice/status/<invoice_id>", methods=["GET"])
+@einvoicing_bp.route("/status/<invoice_id>", methods=["GET"])
 @require_auth
 def get_einvoice_status(invoice_id):
     store_id = g.current_user["store_id"]
@@ -115,8 +115,9 @@ def get_einvoice_status(invoice_id):
         invoice = None
 
     if not invoice:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "E-Invoice not found"}), 404
-
+        return format_response(
+            success=False, status_code=404, error={"code": "NOT_FOUND", "message": "E-Invoice not found"}
+        )
     return format_response(
         True,
         data={
@@ -129,4 +130,4 @@ def get_einvoice_status(invoice_id):
             "submitted_at": invoice.submitted_at.isoformat() if invoice.submitted_at else None,
             "qr_code_data": invoice.qr_code_data,
         },
-    ), 200
+    )

@@ -11,18 +11,8 @@ from app.auth.utils import generate_access_token
 from app.models import Category, Product, Store, Transaction, TransactionItem, User
 
 
-@compiles(JSONB, "sqlite")
-def compile_jsonb(type_, compiler, **kw):
-    return "JSON"
-
-
-@compiles(UUID, "sqlite")
-def compile_uuid(type_, compiler, **kw):
-    return "VARCHAR"
-
-
 @pytest.fixture
-def init_db(app):
+def init_db(app, db_session):
     store = Store(store_name="Test Store")
     db.session.add(store)
     db.session.commit()
@@ -76,7 +66,7 @@ def test_single_sale(client, init_db, auth_headers):
         "line_items": [{"product_id": init_db["prod1"].product_id, "quantity": 2.0, "selling_price": 10.0}],
     }
 
-    resp = client.post("/api/v1/transactions", json=payload, headers=auth_headers["staff"])
+    resp = client.post("/api/v1/transactions/", json=payload, headers=auth_headers["staff"])
     assert resp.status_code == 201
 
     prod1 = db.session.get(Product, init_db["prod1"].product_id)
@@ -151,7 +141,7 @@ def test_staff_date_restriction(client, init_db, auth_headers):
     db.session.add(new_txn)
     db.session.commit()
 
-    resp = client.get("/api/v1/transactions", headers=auth_headers["owner"])
+    resp = client.get("/api/v1/transactions/", headers=auth_headers["owner"])
     assert len(resp.json["data"]) == 2
 
     resp_staff = client.get("/api/v1/transactions", headers=auth_headers["staff"])

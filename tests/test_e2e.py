@@ -232,7 +232,7 @@ def test_full_retail_day(client, app, test_store, test_owner, owner_headers, tes
             ("Cheese", 100, 150, 10),  # low initial stock → will deplete below reorder
         ]:
             resp = client.post(
-                "/api/v1/inventory/products",
+                "/api/v1/inventory",
                 headers=headers,
                 json={
                     "name": name,
@@ -311,7 +311,7 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
 
         # Create product with stock = 20
         resp = client.post(
-            "/api/v1/inventory/products",
+            "/api/v1/inventory",
             headers=headers,
             json={
                 "name": "Widget",
@@ -380,7 +380,7 @@ def test_supplier_po_stock_cycle(client, app, test_store, test_owner, owner_head
         # ── Assertions ───────────────────────────────────────────────────
         assert po.status == "FULFILLED"
 
-        resp = client.get(f"/api/v1/inventory/products/{product_id}", headers=headers)
+        resp = client.get(f"/api/v1/inventory/{product_id}", headers=headers)
         assert resp.status_code == 200
         assert resp.json["data"]["current_stock"] == pytest.approx(50.0)
 
@@ -430,7 +430,7 @@ def test_loyalty_full_cycle(client, app, test_store, test_owner, owner_headers, 
 
         # Create a product
         resp = client.post(
-            "/api/v1/inventory/products",
+            "/api/v1/inventory",
             headers=headers,
             json={
                 "name": "Premium Tea",
@@ -513,7 +513,7 @@ def test_gst_month_compilation(client, app, test_store, test_owner, owner_header
             ("Face Cream", "3304", 100, 200),
         ]:
             resp = client.post(
-                "/api/v1/inventory/products",
+                "/api/v1/inventory",
                 headers=headers,
                 json={
                     "name": name,

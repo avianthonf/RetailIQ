@@ -215,7 +215,7 @@ def customer_transactions(customer_id):
     query = db.session.query(Transaction).filter(
         Transaction.store_id == store_id,
         Transaction.customer_id == customer_id,
-        Transaction.is_return == False,
+        Transaction.is_return.is_(False),
     )
 
     if date_from:

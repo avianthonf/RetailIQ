@@ -89,6 +89,11 @@ def test_deliver_webhook_no_url(app, test_app_and_event):
 
     with patch("app.tasks.webhook_tasks.requests.post") as mock_post:
         deliver_webhook(event.id)
+        from app import db
+
+        # Ensure we refresh from the database to see the change from the task session
+        db.session.expire_all()
+        event = db.session.get(WebhookEvent, event.id)
         mock_post.assert_not_called()
         assert event.status == "FAILED"
 
@@ -184,7 +189,7 @@ def test_sync_api_usage_success(app, test_owner):
     db.session.commit()
     dev_app_id = dev_app.id
 
-    with patch("app.auth.utils.get_redis_client") as mock_get_redis:
+    with patch("app.tasks.webhook_tasks.get_redis_client") as mock_get_redis:
         mock_redis = MagicMock()
         dt = datetime.now(timezone.utc)
         key = f"usage:{dev_app_id}:/api/test:GET:{dt.isoformat()}"
@@ -247,7 +252,7 @@ def test_sync_api_usage_existing_record(app, test_owner):
     db.session.add(existing)
     db.session.commit()
 
-    with patch("app.auth.utils.get_redis_client") as mock_get_redis:
+    with patch("app.tasks.webhook_tasks.get_redis_client") as mock_get_redis:
         mock_redis = MagicMock()
         key = f"usage:{dev_app_id}:/api/test:GET:{dt.isoformat()}"
         mock_redis.keys.return_value = [key]

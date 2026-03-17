@@ -493,7 +493,7 @@ class TestEventRegressors:
                 headers=self._auth_headers(user),
             )
             assert resp.status_code == 200
-            assert resp.json["data"]["model_type"] in ("prophet", "ensemble")
+            assert resp.json["data"]["model_type"] in ("prophet", "ensemble", "ridge")
 
             logs = _db.session.query(DemandSensingLog).filter_by(product_id=prod.product_id).all()
             assert len(logs) == 14  # 14-day horizon

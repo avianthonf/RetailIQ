@@ -16,7 +16,7 @@ def test_onboard_supplier(client, owner_headers):
     """Test onboarding a new supplier to the marketplace."""
     # First, let's create a supplier to attach the profile to, or the endpoint will create one
     rv = client.post(
-        "/api/v2/marketplace/suppliers/onboard",
+        "/api/v1/marketplace/suppliers/onboard",
         headers=owner_headers,
         json={"business_name": "Acme Corp", "business_type": "MANUFACTURER"},
     )
@@ -28,7 +28,7 @@ def test_onboard_supplier(client, owner_headers):
 
 def test_search_catalog_empty(client, owner_headers):
     """Test searching catalog when empty."""
-    rv = client.get("/api/v2/marketplace/search", headers=owner_headers)
+    rv = client.get("/api/v1/marketplace/search", headers=owner_headers)
     assert rv.status_code == 200
     data = rv.get_json()["data"]
     assert len(data["items"]) == 0
@@ -38,14 +38,14 @@ def test_search_catalog_empty(client, owner_headers):
 def test_create_rfq(client, owner_headers):
     """Test creating an RFQ."""
     rv = client.post(
-        "/api/v2/marketplace/rfq", headers=owner_headers, json={"items": [{"category": "Electronics", "quantity": 100}]}
+        "/api/v1/marketplace/rfq", headers=owner_headers, json={"items": [{"category": "Electronics", "quantity": 100}]}
     )
     assert rv.status_code == 201
     data = rv.get_json()["data"]
     assert "rfq_id" in data
 
     # Get it back
-    rv = client.get(f"/api/v2/marketplace/rfq/{data['rfq_id']}", headers=owner_headers)
+    rv = client.get(f"/api/v1/marketplace/rfq/{data['rfq_id']}", headers=owner_headers)
     assert rv.status_code == 200
     rfq_data = rv.get_json()["data"]
     assert rfq_data["status"] == "OPEN"
@@ -55,7 +55,7 @@ def test_create_rfq(client, owner_headers):
 def test_create_order_missing_fields(client, owner_headers):
     """Test creating an order with missing fields."""
     rv = client.post(
-        "/api/v2/marketplace/orders",
+        "/api/v1/marketplace/orders",
         headers=owner_headers,
         json={"supplier_id": 1},  # missing items
     )
@@ -75,8 +75,9 @@ def test_create_order(client, owner_headers, app, test_store):
             product_type="TERM_LOAN",
             min_amount=10,
             max_amount=100000,
-            interest_rate_bps=1200,
-            max_term_days=365,
+            min_tenure_days=30,
+            max_tenure_days=365,
+            base_interest_rate=12.0,
         )
         db.session.add(lp)
         db.session.flush()
@@ -97,7 +98,7 @@ def test_create_order(client, owner_headers, app, test_store):
         ci_id = ci.id
 
     rv = client.post(
-        "/api/v2/marketplace/orders",
+        "/api/v1/marketplace/orders",
         headers=owner_headers,
         json={"supplier_id": sp_id, "items": [{"catalog_item_id": ci_id, "quantity": 5}], "finance_requested": True},
     )
@@ -110,7 +111,7 @@ def test_create_order(client, owner_headers, app, test_store):
     order_id = data["order_id"]
 
     # Get the order back
-    rv = client.get(f"/api/v2/marketplace/orders/{order_id}", headers=owner_headers)
+    rv = client.get(f"/api/v1/marketplace/orders/{order_id}", headers=owner_headers)
     assert rv.status_code == 200
     order_data = rv.get_json()["data"]
     assert order_data["status"] == "SUBMITTED"
@@ -121,7 +122,7 @@ def test_create_order(client, owner_headers, app, test_store):
     assert order_data["items"][0]["subtotal"] == 50.0  # 5 * 10.0
 
     # Test getting tracking
-    rv = client.get(f"/api/v2/marketplace/orders/{order_id}/track", headers=owner_headers)
+    rv = client.get(f"/api/v1/marketplace/orders/{order_id}/track", headers=owner_headers)
     assert rv.status_code == 200
     track_data = rv.get_json()["data"]
     assert "tracking_events" in track_data
@@ -129,7 +130,7 @@ def test_create_order(client, owner_headers, app, test_store):
 
 def test_recommendations(client, owner_headers):
     """Test fetching recommendations."""
-    rv = client.get("/api/v2/marketplace/recommendations", headers=owner_headers)
+    rv = client.get("/api/v1/marketplace/recommendations", headers=owner_headers)
     assert rv.status_code == 200
     data = rv.get_json()["data"]
     assert isinstance(data, list)
@@ -148,7 +149,7 @@ def test_supplier_dashboard(client, owner_headers, app, test_store):
         db.session.commit()
         sp_id = sp.id
 
-    rv = client.get(f"/api/v2/marketplace/suppliers/dashboard?supplier_id={sp_id}", headers=owner_headers)
+    rv = client.get(f"/api/v1/marketplace/suppliers/dashboard?supplier_id={sp_id}", headers=owner_headers)
     assert rv.status_code == 200
     data = rv.get_json()["data"]
     assert "total_orders" in data
@@ -172,7 +173,7 @@ def test_supplier_catalog(client, owner_headers, app, test_store):
         db.session.commit()
         sp_id = sp.id
 
-    rv = client.get(f"/api/v2/marketplace/suppliers/{sp_id}/catalog", headers=owner_headers)
+    rv = client.get(f"/api/v1/marketplace/suppliers/{sp_id}/catalog", headers=owner_headers)
     assert rv.status_code == 200
     data = rv.get_json()["data"]
     assert data["total"] == 2

@@ -14,9 +14,9 @@ from datetime import date, timedelta
 from flask import Blueprint, g, jsonify, request
 from sqlalchemy import text
 
-from app import db
-from app.auth.decorators import require_auth, require_role
-from app.auth.utils import format_response
+from .. import db
+from ..auth.decorators import require_auth, require_role
+from ..auth.utils import format_response
 
 forecasting_bp = Blueprint("forecasting", __name__)
 
@@ -224,3 +224,31 @@ def forecast_sku_endpoint(product_id: int):
         "reorder_suggestion": reorder_suggestion,
     }
     return format_response(data={"historical": historical, "forecast": points}, meta=meta)
+
+
+@forecasting_bp.route("/demand-sensing/<int:product_id>")
+@require_auth
+@require_role("owner")
+def demand_sensing_endpoint(product_id: int):
+    """
+    Advanced demand sensing endpoint using Prophet/Ensemble.
+    Used for event-aware forecasting.
+    """
+    from .engine import generate_demand_forecast
+
+    sid = _store_id()
+    try:
+        result = generate_demand_forecast(sid, product_id, db.session, horizon=14)
+    except Exception as e:
+        return format_response(success=False, error={"code": "FORECAST_ERROR", "message": str(e)}, status_code=500)
+
+    if "error" in result:
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": result["error"]}, status_code=404)
+
+    return format_response(
+        data={
+            "model_type": result["model_type"].lower(),
+            "horizon": 14,
+            "forecast": [{"date": p["date"], "value": p["event_adjusted_forecast"]} for p in result["forecast"]],
+        }
+    )

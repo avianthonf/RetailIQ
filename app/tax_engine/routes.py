@@ -13,7 +13,7 @@ from . import tax_engine_bp
 from .engine import get_tax_calculator
 
 
-@tax_engine_bp.route("/tax/config", methods=["GET"])
+@tax_engine_bp.route("/config", methods=["GET"])
 @require_auth
 def get_tax_config():
     store_id = g.current_user["store_id"]
@@ -37,7 +37,7 @@ def get_tax_config():
     ), 200
 
 
-@tax_engine_bp.route("/tax/calculate", methods=["POST"])
+@tax_engine_bp.route("/calculate", methods=["POST"])
 @require_auth
 def calculate_tax():
     """Preview tax calculation for a set of items."""
@@ -65,7 +65,7 @@ def calculate_tax():
         return format_response(False, error={"code": "CALCULATION_ERROR", "message": str(e)}), 500
 
 
-@tax_engine_bp.route("/tax/filing-summary", methods=["GET"])
+@tax_engine_bp.route("/filing-summary", methods=["GET"])
 @require_auth
 def tax_summary():
     """Multi-country tax filing summary."""

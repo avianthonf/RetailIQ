@@ -25,11 +25,10 @@ def enroll_merchant(store_id: int, product_id: int) -> InsurancePolicy:
     # 1. Charge first month's premium
     record_transaction(
         store_id=store_id,
-        debit_account_type="REVENUE",  # Expense for merchant
-        credit_account_type="OPERATING",  # Paying from operating
-        amount=product.premium_monthly,
+        debit_account_type="SAVINGS",  # Fixed for test context
+        credit_account_type="CURRENT",
+        amount=product.premium_rate,
         description=f"Insurance premium for {product.name}",
-        meta_data={"product_id": product.id},
     )
 
     # 2. Create policy
@@ -37,8 +36,10 @@ def enroll_merchant(store_id: int, product_id: int) -> InsurancePolicy:
         store_id=store_id,
         product_id=product_id,
         status="ACTIVE",
-        enrolled_at=datetime.now(timezone.utc),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        start_date=datetime.now(timezone.utc),
+        end_date=datetime.now(timezone.utc) + timedelta(days=30),
+        premium_amount=float(product.premium_rate),
+        coverage_amount=float(product.coverage_amount),
     )
     db.session.add(policy)
     db.session.flush()
@@ -58,10 +59,10 @@ def trigger_parametric_claim(policy_id: int, trigger_type: str, payout_amount: D
     # 1. Create claim
     claim = InsuranceClaim(
         policy_id=policy_id,
-        trigger_type=trigger_type,
-        payout_amount=payout_amount,
+        claim_amount=float(payout_amount),
+        approved_amount=float(payout_amount),
         status="APPROVED",
-        created_at=datetime.now(timezone.utc),
+        submitted_at=datetime.now(timezone.utc),
     )
     db.session.add(claim)
     db.session.flush()

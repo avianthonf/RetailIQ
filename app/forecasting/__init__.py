@@ -1,1 +1,1 @@
-from .routes import forecasting_bp
+from .routes import forecasting_bp  # noqa: F401

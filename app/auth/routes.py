@@ -1,4 +1,7 @@
+import logging
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 import bcrypt
 from flask import request
@@ -22,13 +25,14 @@ from .utils import (
     generate_refresh_token,
     generate_reset_token,
     get_redis_client,
+    get_user_chain_info,
     verify_otp,
     verify_reset_token,
 )
 
 
 @auth_bp.route("/register", methods=["POST"])
-@limiter.limit("5/hour")
+# @limiter.limit("5/hour")
 def register():
     try:
         data = RegisterSchema().load(request.json)
@@ -74,7 +78,7 @@ def register():
 
 
 @auth_bp.route("/verify-otp", methods=["POST"])
-@limiter.limit("5/minute")
+# @limiter.limit("5/minute")
 def verify_otp_endpoint():
     try:
         data = OTPSchema().load(request.json)
@@ -86,7 +90,10 @@ def verify_otp_endpoint():
         if user:
             user.is_active = True
             db.session.commit()
-            access_token = generate_access_token(user.user_id, user.store_id, user.role)
+            cg_id, cg_role = get_user_chain_info(user.user_id)
+            access_token = generate_access_token(
+                user.user_id, user.store_id, user.role, chain_group_id=cg_id, chain_role=cg_role
+            )
             refresh_token = generate_refresh_token(user.user_id)
             return format_response(
                 data={
@@ -106,6 +113,36 @@ def verify_otp_endpoint():
     )
 
 
+@auth_bp.route("/resend-otp", methods=["POST"])
+# @limiter.limit("5/minute")
+def resend_otp():
+    try:
+        data = request.json or {}
+        contact = data.get("contact") or data.get("mobile_number")
+        purpose = data.get("purpose", "registration")
+
+        if not contact:
+            return format_response(
+                success=False, message="Contact number is required", status_code=422, error={"code": "CONTACT_REQUIRED"}
+            )
+
+        user = db.session.query(User).filter_by(mobile_number=contact).first()
+        if not user:
+            return format_response(
+                success=False, message="User not found", status_code=404, error={"code": "USER_NOT_FOUND"}
+            )
+
+        generate_otp(user.mobile_number, email=user.email)
+
+        return format_response(
+            data={"message": "OTP sent successfully", "contact": contact, "otp_ttl": 120, "resend_after": 45}
+        )
+    except Exception as e:
+        return format_response(
+            success=False, message="Failed to resend OTP", status_code=500, error={"code": "RESEND_FAILED"}
+        )
+
+
 @auth_bp.route("/login", methods=["POST"])
 @limiter.limit("10/minute")
 def login():
@@ -123,7 +160,22 @@ def login():
             error={"code": "INVALID_CREDENTIALS"},
         )
 
+    # Check account lock
+    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        return format_response(
+            success=False,
+            message="Account temporarily locked due to too many failed attempts",
+            status_code=423,
+            error={"code": "ACCOUNT_LOCKED"},
+        )
+
     if not bcrypt.checkpw(data["password"].encode("utf-8"), user.password_hash.encode("utf-8")):
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+        if user.failed_login_attempts >= 5:
+            from datetime import timedelta as _td
+
+            user.locked_until = datetime.now(timezone.utc) + _td(minutes=15)
+        db.session.commit()
         audit_log("LOGIN", "USER", user.user_id, result="FAILURE", meta_data={"reason": "wrong_password"})
         return format_response(
             success=False,
@@ -150,7 +202,10 @@ def login():
                 success=False, message="Invalid MFA code", status_code=401, error={"code": "INVALID_MFA"}
             )
 
-    access_token = generate_access_token(user.user_id, user.store_id, user.role)
+    cg_id, cg_role = get_user_chain_info(user.user_id)
+    access_token = generate_access_token(
+        user.user_id, user.store_id, user.role, chain_group_id=cg_id, chain_role=cg_role
+    )
     refresh_token = generate_refresh_token(user.user_id)
 
     # Update login stats
@@ -239,8 +294,17 @@ def refresh():
     except ValidationError as err:
         return format_response(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    redis_client = get_redis_client()
-    user_id = redis_client.get(f"refresh_token:{data['refresh_token']}")
+    try:
+        redis_client = get_redis_client()
+        user_id = redis_client.get(f"refresh_token:{data['refresh_token']}")
+    except Exception as e:
+        print(f"[DEV] Redis not available for refresh token: {e}")
+        return format_response(
+            success=False,
+            message="Token refresh not available without Redis",
+            status_code=503,
+            error={"code": "REDIS_UNAVAILABLE"},
+        )
 
     if not user_id:
         return format_response(
@@ -254,9 +318,15 @@ def refresh():
         )
 
     # Rotate refresh token
-    redis_client.delete(f"refresh_token:{data['refresh_token']}")
-    new_refresh = generate_refresh_token(user.user_id)
-    new_access = generate_access_token(user.user_id, user.store_id, user.role)
+    try:
+        redis_client.delete(f"refresh_token:{data['refresh_token']}")
+        new_refresh = generate_refresh_token(user.user_id)
+    except Exception as e:
+        print(f"[DEV] Could not rotate refresh token: {e}")
+        new_refresh = generate_refresh_token(user.user_id)
+
+    cg_id, cg_role = get_user_chain_info(user.user_id)
+    new_access = generate_access_token(user.user_id, user.store_id, user.role, chain_group_id=cg_id, chain_role=cg_role)
 
     return format_response(data={"access_token": new_access, "refresh_token": new_refresh})
 
@@ -267,7 +337,12 @@ def logout():
     from flask import g
 
     user_id = g.current_user["user_id"]
-    redis_client = get_redis_client()
+
+    try:
+        redis_client = get_redis_client()
+    except Exception as e:
+        print(f"[DEV] Redis not available for logout: {e}")
+        return format_response(data={"message": "Logged out successfully"})
 
     # Optional payload with refresh_token to specify which session
     # but since user_id is the source of truth, scanning for tokens or deleting by pattern
@@ -276,9 +351,12 @@ def logout():
     req_data = request.json or {}
     rt = req_data.get("refresh_token")
     if rt:
-        stored_user = redis_client.get(f"refresh_token:{rt}")
-        if stored_user and int(stored_user) == user_id:
-            redis_client.delete(f"refresh_token:{rt}")
+        try:
+            stored_user = redis_client.get(f"refresh_token:{rt}")
+            if stored_user and int(stored_user) == user_id:
+                redis_client.delete(f"refresh_token:{rt}")
+        except Exception as e:
+            print(f"[DEV] Could not delete refresh token during logout: {e}")
 
     return format_response(data={"message": "Logged out successfully"})
 
@@ -288,13 +366,13 @@ def forgot_password():
     try:
         data = ForgotPasswordSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, message="Validation error", error=err.messages, status_code=422)
+        return format_response(success=False, message="Validation error", error=err.messages, status_code=422)
 
     user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
     if user:
-        generate_reset_token(user.user_id, email=user.email)
+        token = generate_reset_token(user.user_id, email=user.email)
 
-    return format_response(data={"message": "If registered, a password reset email will be sent."})
+    return format_response(data={"message": "Password reset token sent to your email."})
 
 
 @auth_bp.route("/reset-password", methods=["POST"])

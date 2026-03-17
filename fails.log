@@ -1,0 +1,48 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- C:\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.12.1, asyncio-1.3.0, cov-7.0.0, flask-1.3.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 29 items / 27 deselected / 2 selected
+run-last-failure: rerun previous 2 failures (skipped 24 files)
+
+tests/test_events.py::test_prophet_uses_event_regressor FAILED           [ 50%]
+tests/test_forecasting.py::TestEventRegressors::test_prophet_uses_event_regressor FAILED [100%]
+
+================================== FAILURES ===================================
+______________________ test_prophet_uses_event_regressor ______________________
+tests\test_events.py:158: in test_prophet_uses_event_regressor
+    assert data["model_type"] == "prophet"
+E   AssertionError: assert 'ridge' == 'prophet'
+E     
+E     - prophet
+E     + ridge
+------------------------------ Captured log call ------------------------------
+WARNING  app.forecasting.engine:engine.py:318 Prophet failed (No module named 'prophet'); falling back to linear regression
+____________ TestEventRegressors.test_prophet_uses_event_regressor ____________
+tests\test_forecasting.py:494: in test_prophet_uses_event_regressor
+    assert resp.json["data"]["model_type"] == "prophet"
+E   AssertionError: assert 'ridge' == 'prophet'
+E     
+E     - prophet
+E     + ridge
+------------------------------ Captured log call ------------------------------
+WARNING  app.forecasting.engine:engine.py:318 Prophet failed (No module named 'prophet'); falling back to linear regression
+============================== warnings summary ===============================
+app\auth\schemas.py:40
+  D:\Files\Desktop\RetailIQ-Final-Workspace\RetailIQ\app\auth\schemas.py:40: RemovedInMarshmallow4Warning: The 'default' argument to fields is deprecated. Use 'dump_default' instead.
+    role = fields.String(required=False, validate=validate.OneOf(["staff"]), default="staff")
+
+tests/test_events.py: 90 warnings
+tests/test_forecasting.py: 90 warnings
+  C:\Users\avian\AppData\Roaming\Python\Python314\site-packages\sqlalchemy\engine\default.py:952: DeprecationWarning: The default date adapter is deprecated as of Python 3.12; see the sqlite3 documentation for suggested replacement recipes
+    cursor.execute(statement, parameters)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_events.py::test_prophet_uses_event_regressor - AssertionErr...
+FAILED tests/test_forecasting.py::TestEventRegressors::test_prophet_uses_event_regressor
+=============== 2 failed, 27 deselected, 181 warnings in 2.72s ================

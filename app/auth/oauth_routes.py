@@ -29,14 +29,10 @@ def authorize():
     state = request.args.get("state")
 
     if not client_id or not redirect_uri:
-        return format_response(
-            False, error={"code": "INVALID_REQUEST", "message": "Missing client_id or redirect_uri"}
-        ), 400
-
+        return format_response(False, error={"code": "INVALID_REQUEST", "message": "Missing client_id or redirect_uri"})
     app = db.session.query(DeveloperApplication).filter_by(client_id=client_id).first()
     if not app:
-        return format_response(False, error={"code": "INVALID_CLIENT", "message": "Invalid client_id"}), 400
-
+        return format_response(success=False, error={"code": "INVALID_CLIENT", "message": "Invalid client_id"})
     # In a real app, we would verify redirect_uri against app.redirect_uris
     # And show a consent screen (render_template).
     # For this implementation, we'll auto-approve if it's a POST or just a simplified GET.
@@ -54,10 +50,9 @@ def authorize():
         )
 
     # POST processing
-    confirm = request.form.get("confirm") or request.json.get("confirm")
+    confirm = request.form.get("confirm") or (request.json.get("confirm") if request.is_json else None)
     if str(confirm).lower() != "true":
-        return format_response(False, error={"code": "ACCESS_DENIED", "message": "User denied access"}), 403
-
+        return format_response(success=False, error={"code": "ACCESS_DENIED", "message": "User denied access"})
     user_id = g.current_user["user_id"]
     code = generate_auth_code(client_id, user_id, scope.split(" "))
 
@@ -71,52 +66,52 @@ def authorize():
 
 
 @oauth_bp.route("/token", methods=["POST"])
-@limiter.limit("20/minute")
 def token():
     """
     Token exchange endpoint (Authorization Code or Client Credentials).
     """
-    grant_type = request.form.get("grant_type") or request.json.get("grant_type")
-    client_id = request.form.get("client_id") or request.json.get("client_id")
-    client_secret = request.form.get("client_secret") or request.json.get("client_secret")
+    if request.is_json:
+        data = request.json
+    else:
+        data = request.form
+
+    grant_type = data.get("grant_type")
+    client_id = data.get("client_id")
+    client_secret = data.get("client_secret")
 
     if not grant_type:
         return jsonify({"error": "invalid_request", "error_description": "Missing grant_type"}), 400
 
     # Verify Client Credentials for all grant types
-    app = verify_client_credentials(client_id, client_secret)
-    if not app:
+    app_obj = verify_client_credentials(client_id, client_secret)
+    if not app_obj:
         return jsonify({"error": "invalid_client", "error_description": "Invalid client credentials"}), 401
 
     if grant_type == "authorization_code":
-        code = request.form.get("code") or request.json.get("code")
+        code = data.get("code")
         if not code:
             return jsonify({"error": "invalid_request", "error_description": "Missing code"}), 400
-
         auth_data = verify_auth_code(code, client_id)
         if not auth_data:
-            return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired code"}), 400
-
-        tokens = generate_oauth_tokens(app.id, user_id=auth_data["user_id"], scopes=auth_data["scopes"])
+            return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired code"}), 401
+        tokens = generate_oauth_tokens(app_obj.id, user_id=auth_data["user_id"], scopes=auth_data["scopes"])
         return jsonify(tokens)
 
     elif grant_type == "client_credentials":
         # Scopes from request or default to app scopes
-        req_scopes = request.form.get("scope") or request.json.get("scope")
-        scopes = req_scopes.split(" ") if req_scopes else app.scopes
+        req_scopes = data.get("scope")
+        scopes = req_scopes.split(" ") if req_scopes else app_obj.scopes
 
-        tokens = generate_oauth_tokens(app.id, scopes=scopes)
+        tokens = generate_oauth_tokens(app_obj.id, scopes=scopes)
         return jsonify(tokens)
 
     elif grant_type == "refresh_token":
-        rt = request.form.get("refresh_token") or request.json.get("refresh_token")
+        rt = data.get("refresh_token")
         if not rt:
             return jsonify({"error": "invalid_request", "error_description": "Missing refresh_token"}), 400
-
         tokens = refresh_oauth_token(rt, client_id, client_secret)
         if not tokens:
-            return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired refresh token"}), 400
-
+            return jsonify({"error": "invalid_grant", "error_description": "Invalid or expired refresh token"}), 401
         return jsonify(tokens)
 
     return jsonify({"error": "unsupported_grant_type"}), 400

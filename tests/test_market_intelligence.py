@@ -139,7 +139,7 @@ def test_engine_sentiment(app):
 
 
 def test_api_signals_endpoint(client, owner_headers, market_setup):
-    """Test the /api/v2/market/signals endpoint"""
+    """Test the /api/v1/market/signals endpoint"""
     cat_id, source_id = market_setup
 
     # Needs app context to insert
@@ -148,7 +148,7 @@ def test_api_signals_endpoint(client, owner_headers, market_setup):
         db.session.add(signal)
         db.session.commit()
 
-    res = client.get("/api/v2/market/signals", headers=owner_headers)
+    res = client.get("/api/v1/market/signals", headers=owner_headers)
     assert res.status_code == 200
     data = res.json["data"]
     assert len(data) >= 1

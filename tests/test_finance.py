@@ -28,25 +28,27 @@ def seeded_finance(app, test_store):
             product_type="TERM_LOAN",
             min_amount=1000,
             max_amount=50000,
-            interest_rate_bps=1200,  # 12%
-            max_term_days=365,
+            min_tenure_days=30,
+            max_tenure_days=365,
+            base_interest_rate=12.0,  # 12%
         )
         rev_advance = LoanProduct(
             name="Revenue Advance",
-            product_type="REVENUE_ADVANCE",
+            product_type="WORKING_CAPITAL",
             min_amount=500,
             max_amount=10000,
-            interest_rate_bps=1500,  # 15%
-            max_term_days=90,
+            min_tenure_days=7,
+            max_tenure_days=90,
+            base_interest_rate=15.0,  # 15%
         )
 
         # 2. Insurance Products
         weather_ins = InsuranceProduct(
             name="Rainfall Protection",
-            category="WEATHER",
-            description="Pays out if rainfall exceeds 50mm",
-            premium_monthly=500,
-            max_coverage=10000,
+            product_type="WEATHER",
+            provider="AgriRisk",
+            premium_rate=0.05,
+            coverage_amount=10000,
         )
 
         db.session.add_all([term_loan, rev_advance, weather_ins])
@@ -232,4 +234,4 @@ def test_parametric_insurance(app, test_store, seeded_finance):
         claim = trigger_parametric_claim(policy.id, "HEAVY_RAIN_55MM", Decimal("5000.00"))
         db.session.commit()
         assert claim.status == "PAID"
-        assert claim.payout_amount == Decimal("5000.00")
+        assert claim.approved_amount == Decimal("5000.00")

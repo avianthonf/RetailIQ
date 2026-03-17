@@ -8,6 +8,8 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -20,6 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 models_bp = Blueprint("models", __name__)
@@ -222,6 +225,14 @@ class Transaction(Base, AuditMixin):
         UUID(as_uuid=True), ForeignKey("staff_sessions.id"), nullable=True
     )
     total_amount: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+
+    @hybrid_property
+    def id(self):
+        return self.transaction_id
+
+    @id.setter
+    def id(self, value):
+        self.transaction_id = value
 
     __table_args__ = (
         Index("idx_transactions_store_created", "store_id", text("created_at DESC")),
@@ -771,6 +782,25 @@ class EventImpactActuals(Base, AuditMixin):
     product_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("products.product_id"))
     actual_impact_pct: Mapped[float | None] = mapped_column(Numeric(6, 2))
     measured_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, default=lambda: datetime.now(timezone.utc))
+
+
+class ForecastConfig(Base, AuditMixin):
+    __tablename__ = "forecast_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey("stores.store_id"), nullable=False)
+    model_type: Mapped[str] = mapped_column(String(32), default="PROPHET")
+    forecast_horizon_days: Mapped[int] = mapped_column(Integer, default=30)
+    granularity: Mapped[str] = mapped_column(String(16), default="DAILY")
+
+
+class EventRegressor(Base, AuditMixin):
+    __tablename__ = "event_regressors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("forecast_configs.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    prior_scale: Mapped[float] = mapped_column(Float, default=10.0)
 
 
 # ── Vision / OCR Models ───────────────────────────────────────────────────────

@@ -11,6 +11,12 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def get_redis_client():
+    from ..utils.redis import get_redis_client as _get
+
+    return _get()
+
+
 def send_template_message(
     phone_number_id: str,
     access_token: str,

@@ -1,5 +1,5 @@
-from app.store.routes import store_bp
+from flask import Blueprint
 
+store_bp = Blueprint("store", __name__)
 
-def init_app(app):
-    app.register_blueprint(store_bp)
+from . import routes  # noqa: E402, F401

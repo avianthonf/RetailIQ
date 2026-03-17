@@ -1,1 +1,1 @@
-from .routes import decisions_bp
+from .routes import decisions_bp  # noqa: F401

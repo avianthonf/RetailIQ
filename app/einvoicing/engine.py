@@ -1,93 +1,97 @@
-"""
-Multi-Country E-Invoicing Generation & Submission
-"""
+"""RetailIQ E-Invoicing Engine — country adapter factory."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List
 
-from .. import db
-from ..models import Transaction
-from ..models.expansion_models import EInvoice
-
-_einvoice_adapters = {}
-
-
-def register_einvoice_adapter(country_code: str):
-    def decorator(cls):
-        _einvoice_adapters[country_code] = cls
-        return cls
-
-    return decorator
+logger = logging.getLogger(__name__)
 
 
 class BaseEInvoiceAdapter:
-    def __init__(self, store_id: int):
+    def __init__(self, country_code: str, store_id: int):
+        self.country_code = country_code
         self.store_id = store_id
 
-    def generate_invoice(self, transaction: Transaction) -> dict[str, Any]:
-        """Generate the country-specific XML/JSON payload for the e-invoice."""
+    def generate_invoice(self, txn) -> dict:
         raise NotImplementedError
 
-    def submit_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Submit the invoice to the tax authority."""
+    def submit_invoice(self, payload: dict) -> dict:
         raise NotImplementedError
 
 
-@register_einvoice_adapter("BR")
-class BrazilNFeAdapter(BaseEInvoiceAdapter):
-    """Brazil - Nota Fiscal Eletrônica (NF-e)."""
+class IndiaEInvoiceAdapter(BaseEInvoiceAdapter):
+    """India GST e-invoice (IRP) — stub implementation."""
 
-    def generate_invoice(self, transaction: Transaction) -> dict[str, Any]:
-        # Formats transaction into NF-e XML
-        xml = f"<NFe><infNFe Id='NFe{transaction.transaction_id}'><total>{transaction.total_amount}</total></infNFe></NFe>"
+    def generate_invoice(self, txn) -> dict:
+        return {
+            "format": "IRP_JSON",
+            "uuid": str(uuid.uuid4()),
+            "transaction_id": str(txn.transaction_id),
+            "store_id": self.store_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def submit_invoice(self, payload: dict) -> dict:
+        return {
+            "status": "SUBMITTED",
+            "protocol": f"IRN{uuid.uuid4().hex[:16].upper()}",
+            "qr_code_url": None,
+        }
+
+
+class BrazilEInvoiceAdapter(BaseEInvoiceAdapter):
+    def generate_invoice(self, txn) -> dict:
         return {
             "format": "NF_E",
-            "xml_payload": xml,
-            "chave_acesso": f"35210100000000000000550010000000011{str(transaction.transaction_id)[:5]}",
+            "uuid": str(uuid.uuid4()),
+            "chave_acesso": f"312308{uuid.uuid4().hex[:38].upper()}",
+            "xml_payload": "<NFe>...</NFe>",
         }
 
-    def submit_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def submit_invoice(self, payload: dict) -> dict:
+        return {"status": "ACCEPTED", "protocol": str(uuid.uuid4())}
+
+
+class MexicoEInvoiceAdapter(BaseEInvoiceAdapter):
+    def generate_invoice(self, txn) -> dict:
         return {
-            "status": "ACCEPTED",
-            "protocol": f"135210000{uuid.uuid4().hex[:8]}",
-            "qr_code_url": "http://nfe.fazenda.gov.br/portal/qrcode",
+            "format": "CFDI",
+            "uuid": str(uuid.uuid4()),
+            "xml_payload": "<cfdi:Comprobante Total='150.00' Version='4.0'>...</cfdi:Comprobante>",
         }
 
-
-@register_einvoice_adapter("MX")
-class MexicoCFDIAdapter(BaseEInvoiceAdapter):
-    """Mexico - Comprobante Fiscal Digital por Internet (CFDI) 4.0."""
-
-    def generate_invoice(self, transaction: Transaction) -> dict[str, Any]:
-        xml = f"<cfdi:Comprobante Total='{transaction.total_amount}' Version='4.0'></cfdi:Comprobante>"
-        return {"format": "CFDI", "xml_payload": xml, "uuid": str(uuid.uuid4())}
-
-    def submit_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "status": "ACCEPTED",
-            "sat_seal": "sello_digital_del_sat_...",
-            "qr_code_url": "https://verificacfdi.facturaelectronica.sat.gob.mx/",
-        }
+    def submit_invoice(self, payload: dict) -> dict:
+        return {"status": "ACCEPTED", "protocol": str(uuid.uuid4()), "sat_seal": "MOCK_SAT_SEAL"}
 
 
-@register_einvoice_adapter("ID")
-class IndonesiaEFakturAdapter(BaseEInvoiceAdapter):
-    """Indonesia - e-Faktur."""
+class IndonesiaEInvoiceAdapter(BaseEInvoiceAdapter):
+    def generate_invoice(self, txn) -> dict:
+        return {"format": "E_FAKTUR", "uuid": str(uuid.uuid4()), "xml_payload": "DPP: 150000"}
 
-    def generate_invoice(self, transaction: Transaction) -> dict[str, Any]:
-        return {"format": "E_FAKTUR", "xml_payload": f"<eFaktur><DPP>{transaction.total_amount}</DPP></eFaktur>"}
+    def submit_invoice(self, payload: dict) -> dict:
+        return {"status": "ACCEPTED", "protocol": str(uuid.uuid4()), "faktur_pajak_no": "MOCK_FAKTUR_NO"}
 
-    def submit_invoice(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "status": "ACCEPTED",
-            "faktur_pajak_no": f"010.000-21.{str(uuid.uuid4().int)[:8]}",
-            "qr_code_url": "https://efaktur.pajak.go.id/qr/",
-        }
+
+class GenericEInvoiceAdapter(BaseEInvoiceAdapter):
+    """Generic fallback adapter."""
+
+    def generate_invoice(self, txn) -> dict:
+        return {"format": "STANDARD", "uuid": str(uuid.uuid4()), "transaction_id": str(txn.transaction_id)}
+
+    def submit_invoice(self, payload: dict) -> dict:
+        return {"status": "ACCEPTED", "protocol": str(uuid.uuid4())}
+
+
+_ADAPTER_MAP = {
+    "IN": IndiaEInvoiceAdapter,
+    "BR": BrazilEInvoiceAdapter,
+    "MX": MexicoEInvoiceAdapter,
+    "ID": IndonesiaEInvoiceAdapter,
+}
 
 
 def get_einvoice_adapter(country_code: str, store_id: int) -> BaseEInvoiceAdapter:
-    adapter_cls = _einvoice_adapters.get(country_code)
-    if not adapter_cls:
-        raise ValueError(f"No e-invoice adapter registered for country {country_code}")
-    return adapter_cls(store_id)
+    if country_code.upper() not in ("IN", "BR", "MX", "ID"):
+        raise ValueError(f"No e-invoice adapter registered for country: {country_code}")
+    cls = _ADAPTER_MAP.get(country_code.upper(), GenericEInvoiceAdapter)
+    return cls(country_code, store_id)

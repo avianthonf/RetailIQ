@@ -17,6 +17,9 @@ class FakeRedis:
     def delete(self, key):
         self.data.pop(key, None)
 
+    def ping(self):
+        return True
+
 
 def test_refresh_token_rotation_and_logout(client, app, monkeypatch):
     fake = FakeRedis()

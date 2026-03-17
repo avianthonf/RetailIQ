@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import db
-from app.models import Developer, DeveloperApplication, Product, Store, User
+from app.models import Category, Developer, DeveloperApplication, Product, Store, User
 
 # ── Fake Redis for OAuth token flows ────────────────────────────────────────
 
@@ -45,6 +45,10 @@ class FakeRedis:
 
     def set(self, key, value, ex=None):
         self._data[key] = value
+
+    def setex(self, key, time, value):
+        self._data[key] = value
+        self._ttl[key] = time
 
     def incr(self, key):
         val = int(self._data.get(key, 0)) + 1
@@ -77,6 +81,9 @@ class FakeRedis:
         import fnmatch
 
         return [k for k in self._data if fnmatch.fnmatch(k, pattern)]
+
+    def ping(self):
+        return True
 
     @classmethod
     def from_url(cls, *args, **kwargs):
@@ -228,10 +235,15 @@ def test_oauth_client_credentials_flow(client, developer_account):
     assert token_data["expires_in"] == 3600
 
     # 3. Seed a product and call V2 inventory endpoint
+    cat = Category(name="Electronics", store_id=developer_account.store_id)
+    db.session.add(cat)
+    db.session.flush()
+
     p = Product(
         name="Test Gadget",
         sku_code="GAD-001",
         store_id=developer_account.store_id,
+        category_id=cat.category_id,
         cost_price=100,
         selling_price=150,
         current_stock=10,
@@ -301,10 +313,15 @@ def test_webhook_broadcast_on_transaction(mock_deliver, mock_alerts, mock_rebuil
     db.session.commit()
 
     # 2. Seed a product
+    cat = Category(name="Misc", store_id=developer_account.store_id)
+    db.session.add(cat)
+    db.session.flush()
+
     p = Product(
         name="Webhook Item",
         sku_code="WBH-001",
         store_id=developer_account.store_id,
+        category_id=cat.category_id,
         cost_price=10,
         selling_price=20,
         current_stock=100,

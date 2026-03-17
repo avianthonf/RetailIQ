@@ -18,10 +18,9 @@ from datetime import date, datetime, timedelta, timezone
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import text
 
-from app import db
-from app.auth.decorators import require_auth, require_role
-from app.auth.utils import format_response
-
+from .. import db
+from ..auth.decorators import require_auth, require_role
+from ..auth.utils import format_response
 from .helpers import (
     aggregate_by_period,
     bucket_date,
@@ -278,7 +277,6 @@ def contribution():
     current = _sku_totals(start, end)
     prior = _sku_totals(cmp_start, cmp_end)
 
-    set(current) | set(prior)
     total_rev_current = sum(float(current[p].rev or 0) for p in current)
     total_rev_prior = sum(float(prior[p].rev or 0) for p in prior)
     total_rev_change = total_rev_current - total_rev_prior

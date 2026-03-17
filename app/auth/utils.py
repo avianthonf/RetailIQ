@@ -1,116 +1,227 @@
+"""
+RetailIQ Auth Utilities
+========================
+JWT token generation, OTP generation/verification, format_response helper.
+"""
+
+import logging
+import random
 import secrets
+import smtplib
 import string
-import uuid
 from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from functools import wraps
 
 import jwt
-import redis
-from flask import current_app
+from flask import current_app, jsonify, make_response
 
-from app.utils.responses import standard_json as format_response
+from .. import db
+from ..utils.redis import get_redis_client
 
-
-def get_redis_client():
-    redis_url = current_app.config.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
-    return redis.Redis.from_url(redis_url, decode_responses=True)
+logger = logging.getLogger(__name__)
 
 
-def generate_access_token(user_id, store_id, role):
-    from app import db
-    from app.models import StoreGroup
+# ── JWT Tokens ────────────────────────────────────────────────────────────────
 
-    private_key = current_app.config["JWT_PRIVATE_KEY"]
-    now = datetime.now(timezone.utc)
+
+def format_response(success=True, data=None, message=None, error=None, status_code=None, meta=None):
+    """
+    Unified JSON response envelope.
+    Returns a Flask Response object (not a tuple) so callers can either:
+      return format_response(...)            ← Response with embedded status
+      return format_response(...), 201       ← Flask overrides with 201
+    """
     payload = {
+        "success": success,
+        "data": data,
+        "error": error,
+        "meta": meta,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if message:
+        payload["message"] = message
+
+    if status_code is None:
+        status_code = 200 if success else 400
+
+    return make_response(jsonify(payload), status_code)
+
+
+def _config_seconds(value) -> int:
+    """Normalize JWT expiry config values to integer seconds."""
+    if isinstance(value, timedelta):
+        return int(value.total_seconds())
+    return int(value)
+
+
+# ── JWT Tokens ────────────────────────────────────────────────────────────────
+
+
+def generate_access_token(
+    user_id: int,
+    store_id: int | None,
+    role: str | None,
+    chain_group_id: str | None = None,
+    chain_role: str | None = None,
+) -> str:
+    """Generate a short-lived JWT access token."""
+    now = datetime.now(timezone.utc)
+    expires = _config_seconds(current_app.config["JWT_ACCESS_TOKEN_EXPIRES"])
+    payload = {
+        "sub": str(user_id),
         "user_id": user_id,
         "store_id": store_id,
         "role": role,
-        "iat": now.timestamp(),
-        "exp": (now + timedelta(minutes=60)).timestamp(),
+        "chain_group_id": chain_group_id,
+        "chain_role": chain_role,
+        "iat": now,
+        "exp": now + timedelta(seconds=expires),
+        "type": "access",
     }
-
-    # Inject Chain claims
-    store_group = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
-    if store_group:
-        payload["chain_group_id"] = str(store_group.id)
-        payload["chain_role"] = "CHAIN_OWNER"
-
-    return jwt.encode(payload, private_key, algorithm="RS256")
+    return jwt.encode(
+        payload,
+        current_app.config["JWT_SECRET_KEY"],
+        algorithm=current_app.config.get("JWT_ALGORITHM", "HS256"),
+    )
 
 
-def generate_refresh_token(user_id):
-    redis_client = get_redis_client()
-    token = str(uuid.uuid4())
-    # 30 days expiry
-    redis_client.setex(f"refresh_token:{token}", 30 * 24 * 3600, user_id)
+def generate_refresh_token(user_id: int) -> str:
+    """Generate a refresh token and store it in Redis with TTL."""
+    token = secrets.token_urlsafe(48)
+    try:
+        redis = get_redis_client()
+        expires = _config_seconds(current_app.config["JWT_REFRESH_TOKEN_EXPIRES"])
+        redis.setex(f"refresh_token:{token}", expires, str(user_id))
+    except Exception as exc:
+        logger.warning("Redis unavailable; refresh token not persisted: %s", exc)
     return token
 
 
-def generate_otp(identifier, email=None):
-    """Generate a 6-digit OTP, store in Redis, and (optionally) email it.
+def decode_access_token(token: str) -> dict | None:
+    """Decode and validate a JWT access token. Returns payload or None."""
+    try:
+        return jwt.decode(
+            token,
+            current_app.config["JWT_SECRET_KEY"],
+            algorithms=[current_app.config.get("JWT_ALGORITHM", "HS256")],
+        )
+    except jwt.ExpiredSignatureError:
+        logger.debug("Token expired")
+        return None
+    except jwt.InvalidTokenError as exc:
+        logger.debug("Invalid token: %s", exc)
+        return None
 
-    Args:
-        identifier: The Redis key suffix (mobile_number).
-        email: If provided, sends the OTP to this email address.
-    """
-    from app.email import send_otp_email
 
-    redis_client = get_redis_client()
-    otp = "".join(secrets.choice(string.digits) for _ in range(6))
-    # 300s TTL
-    redis_client.setex(f"otp:{identifier}", 300, otp)
+# ── OTP ───────────────────────────────────────────────────────────────────────
+
+
+def _otp_redis_key(mobile_number: str) -> str:
+    return f"otp:{mobile_number}"
+
+
+def generate_otp(mobile_number: str, email: str | None = None) -> str:
+    """Generate a 6-digit OTP, store in Redis, and optionally email it."""
+    otp = "".join(random.choices(string.digits, k=6))
+    ttl = current_app.config.get("OTP_TTL_SECONDS", 120)
+
+    try:
+        redis = get_redis_client()
+        redis.setex(_otp_redis_key(mobile_number), ttl, otp)
+    except Exception as exc:
+        logger.warning("Redis unavailable; OTP not stored: %s", exc)
+        # In dev mode, log OTP to console so developers can still test
+        logger.info("[DEV] OTP for %s: %s", mobile_number, otp)
 
     if email:
+        from ..email import send_otp_email
+
         send_otp_email(email, otp)
     else:
-        print(f"[DEV] OTP for {identifier}: {otp}")
+        # Always log OTP in non-production environments for testing
+        env = current_app.config.get("ENVIRONMENT", "development")
+        if env != "production":
+            logger.info("[DEV] OTP for %s (email: %s): %s", mobile_number, email, otp)
 
     return otp
 
 
-def verify_otp(mobile_number, otp):
-    redis_client = get_redis_client()
-    key = f"otp:{mobile_number}"
-    stored_otp = redis_client.get(key)
-    if stored_otp and stored_otp == otp:
-        redis_client.delete(key)
-        return True
-    return False
+def verify_otp(mobile_number: str, otp: str) -> bool:
+    """Verify OTP against Redis store. Returns True if valid."""
+    try:
+        redis = get_redis_client()
+        stored = redis.get(_otp_redis_key(mobile_number))
+        if stored and stored == otp:
+            redis.delete(_otp_redis_key(mobile_number))
+            return True
+        return False
+    except Exception as exc:
+        logger.warning("Redis unavailable for OTP verification: %s", exc)
+        return False
 
 
-def generate_reset_token(user_id, email=None):
-    """Generate a password-reset token, store in Redis, and (optionally) email it.
+# ── Password Reset Tokens ─────────────────────────────────────────────────────
 
-    Args:
-        user_id: The user ID to associate with the reset token.
-        email: If provided, sends the reset token to this email address.
-    """
-    from app.email import send_password_reset_email
 
-    redis_client = get_redis_client()
-    token = str(uuid.uuid4())
-    # 10 mins TTL
-    redis_client.setex(f"reset:{token}", 600, user_id)
+def generate_reset_token(user_id: int, email: str | None = None) -> str:
+    """Generate a password reset token stored in Redis for 15 minutes."""
+    token = secrets.token_urlsafe(32)
+    try:
+        redis = get_redis_client()
+        redis.setex(f"reset_token:{token}", 900, str(user_id))
+    except Exception as exc:
+        logger.warning("Redis unavailable; reset token not stored: %s", exc)
 
     if email:
+        from ..email import send_password_reset_email
+
         send_password_reset_email(email, token)
     else:
-        print(f"[DEV] Password Reset Token for user {user_id}: {token}")
+        env = current_app.config.get("ENVIRONMENT", "development")
+        if env != "production":
+            logger.info("[DEV] Reset token for user_id=%s: %s", user_id, token)
 
     return token
 
 
-def verify_reset_token(token):
-    redis_client = get_redis_client()
-    user_id = redis_client.get(f"reset:{token}")
-    if not user_id:
+def verify_reset_token(token: str) -> int | None:
+    """Verify reset token; returns user_id or None."""
+    try:
+        redis = get_redis_client()
+        uid = redis.get(f"reset_token:{token}")
+        if uid:
+            redis.delete(f"reset_token:{token}")
+            return int(uid)
         return None
-    return user_id
+    except Exception as exc:
+        logger.warning("Redis unavailable for reset token verification: %s", exc)
+        return None
 
 
-def generate_team_invite(store_id):
-    redis_client = get_redis_client()
-    invite_code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
-    # 24 hours TTL
-    redis_client.setex(f"invite:{invite_code}", 24 * 3600, store_id)
-    return invite_code
+# ── Redis Client ──────────────────────────────────────────────────────────────
+
+_redis_client = None
+
+
+def get_redis_client():
+    """Get (or create) a Redis client. Raises on failure."""
+    global _redis_client
+    if _redis_client is None:
+        import redis as redis_lib
+
+        url = current_app.config.get("REDIS_URL", "redis://localhost:6379/0")
+        _redis_client = redis_lib.from_url(url, decode_responses=True)
+    _redis_client.ping()  # Raises redis.ConnectionError if unavailable
+    return _redis_client
+
+
+def get_user_chain_info(user_id: int):
+    """Retrieve chain_group_id and chain_role for a user if they own a group."""
+    from ..models import StoreGroup
+
+    group = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
+    if group:
+        return str(group.id), "CHAIN_OWNER"
+    return None, None

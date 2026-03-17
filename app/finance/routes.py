@@ -49,7 +49,7 @@ def submit_kyc():
     kyc.business_type = data.get("business_type")
     kyc.tax_id = data.get("tax_id")
     kyc.document_urls = data.get("document_urls", {})
-    kyc.verification_status = "PENDING"
+    kyc.kyc_status = "PENDING"
 
     db.session.commit()
     return jsonify({"message": "KYC submitted successfully", "status": "PENDING"}), 201
@@ -64,7 +64,11 @@ def get_kyc_status():
         return jsonify({"status": "NOT_STARTED"}), 200
 
     return jsonify(
-        {"status": kyc.verification_status, "tax_id": kyc.tax_id, "updated_at": kyc.updated_at.isoformat()}
+        {
+            "status": kyc.kyc_status,
+            "tax_id": kyc.tax_id,
+            "updated_at": kyc.updated_at.isoformat() if kyc.updated_at else None,
+        }
     ), 200
 
 
@@ -90,7 +94,7 @@ def get_credit_score():
             "score": profile.credit_score,
             "tier": profile.risk_tier,
             "factors": profile.factors,
-            "last_updated": profile.last_recalculated.isoformat(),
+            "last_updated": (profile.last_evaluated_at or profile.created_at).isoformat(),
         }
     ), 200
 
@@ -118,10 +122,8 @@ def get_accounts():
         [
             {
                 "id": a.id,
-                "name": a.account_name,
                 "type": a.account_type,
                 "balance": float(a.balance),
-                "currency": a.currency,
             }
             for a in accounts
         ]
@@ -189,7 +191,7 @@ def list_loans():
                 "id": l.id,
                 "amount": float(l.approved_amount or l.requested_amount),
                 "status": l.status,
-                "applied_at": l.applied_at.isoformat(),
+                "applied_at": l.created_at.isoformat(),
                 "outstanding": float(l.outstanding_principal),
             }
             for l in loans

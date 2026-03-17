@@ -1,68 +1,150 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom'
+import { useAuthStore } from '@/stores/authStore'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { MaintenanceBanner } from '@/components/MaintenanceBanner'
+import { Layout } from '@/components/Layout'
 
-const App = () => {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+// Auth pages
+import { WelcomePage } from '@/pages/auth/WelcomePage'
+import { RegisterPage } from '@/pages/auth/RegisterPage'
+import { LoginPage } from '@/pages/auth/LoginPage'
+import { OTPPage } from '@/pages/auth/OTPPage'
+import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
+import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
 
-  useEffect(() => {
-    window.addEventListener('online', () => setIsOnline(true));
-    window.addEventListener('offline', () => setIsOnline(false));
-    return () => {
-      window.removeEventListener('online', () => setIsOnline(true));
-      window.removeEventListener('offline', () => setIsOnline(false));
-    };
-  }, []);
+// Main pages
+import { DashboardPage } from '@/pages/dashboard/DashboardPage'
+import { InventoryPage } from '@/pages/inventory/InventoryPage'
+import { POSPage } from '@/pages/pos/POSPage'
+import { SuppliersPage } from '@/pages/suppliers/SuppliersPage'
+import { PricingPage } from '@/pages/pricing/PricingPage'
+import { LoyaltyPage } from '@/pages/loyalty/LoyaltyPage'
+import { AnalyticsPage } from '@/pages/analytics/AnalyticsPage'
+import { SettingsPage } from '@/pages/settings/SettingsPage'
+
+function App() {
+  const { isAuthenticated, isMaintenance } = useAuthStore()
+
+  if (isMaintenance) {
+    return (
+      <>
+        <MaintenanceBanner />
+        <div className="min-h-screen flex items-center justify-center bg-neutral-900 text-white">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold mb-4">System Under Maintenance</h1>
+            <p className="text-lg text-neutral-300">We'll be back shortly. Thank you for your patience.</p>
+          </div>
+        </div>
+      </>
+    )
+  }
 
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-gray-100">
-        <nav className="bg-blue-600 text-white p-4 flex justify-between">
-          <div className="font-bold text-xl">RetailIQ PWA</div>
-          <div className="flex gap-4">
-            <Link to="/">Dashboard</Link>
-            <Link to="/inventory">Inventory</Link>
-            {!isOnline && <span className="bg-red-500 px-2 rounded">Offline Mode</span>}
-          </div>
-        </nav>
-        
-        <main className="p-4">
-          <Routes>
-            <Route path="/" element={<Dashboard isOnline={isOnline} />} />
-            <Route path="/inventory" element={<Inventory isOnline={isOnline} />} />
-          </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
-  );
-};
+    <div className="min-h-screen bg-background">
+      <Routes>
+        {/* Public routes */}
+        <Route path="/auth/welcome" element={<WelcomePage />} />
+        <Route path="/auth/register" element={<RegisterPage />} />
+        <Route path="/auth/login" element={<LoginPage />} />
+        <Route path="/auth/otp" element={<OTPPage />} />
+        <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
-const Dashboard = ({ isOnline }: { isOnline: boolean }) => (
-  <div className="grid grid-cols-2 gap-4">
-    <div className="bg-white p-4 rounded shadow">
-      <h3 className="text-gray-500">Today's Sales</h3>
-      <p className="text-2xl font-bold">₹45,230</p>
+        {/* Redirect root to welcome or dashboard */}
+        <Route 
+          path="/" 
+          element={
+            isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/auth/welcome" replace />
+          } 
+        />
+
+        {/* Protected routes */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <DashboardPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inventory"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <InventoryPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pos"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <POSPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/suppliers"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SuppliersPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pricing"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <PricingPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/loyalty"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <LoyaltyPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <AnalyticsPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SettingsPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* 404 */}
+        <Route path="*" element={<div>Page not found</div>} />
+      </Routes>
     </div>
-    <div className="bg-white p-4 rounded shadow">
-      <h3 className="text-gray-500">Transactions</h3>
-      <p className="text-2xl font-bold">128</p>
-    </div>
-  </div>
-);
+  )
+}
 
-const Inventory = ({ isOnline }: { isOnline: boolean }) => (
-  <div className="bg-white p-4 rounded shadow">
-    <h2 className="text-xl font-bold mb-4">Inventory List</h2>
-    {isOnline ? (
-      <ul>
-        <li className="flex justify-between py-2 border-b">
-          <span>Premium Coffee Beans</span>
-          <span className="font-bold">₹350.00</span>
-        </li>
-      </ul>
-    ) : (
-      <div className="text-yellow-600">Showing cached inventory mode.</div>
-    )}
-  </div>
-);
-
-export default App;
+export default App

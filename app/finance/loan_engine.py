@@ -26,16 +26,16 @@ def apply_for_loan(store_id: int, product_id: int, amount: Decimal, term_days: i
     if not (product.min_amount <= amount <= product.max_amount):
         raise LoanError(f"Amount {amount} is outside allowed range for this product.")
 
-    if term_days > product.max_term_days:
+    if term_days > product.max_tenure_days:
         raise LoanError(f"Term {term_days} days exceeds maximum allowed.")
 
     application = LoanApplication(
         store_id=store_id,
-        product_id=product_id,
+        loan_product_id=product_id,
         requested_amount=amount,
-        status="APPLIED",
-        term_days=term_days,
-        applied_at=datetime.now(timezone.utc),
+        status="PENDING",
+        tenure_days=term_days,
+        created_at=datetime.now(timezone.utc),
     )
     db.session.add(application)
     db.session.flush()
@@ -45,14 +45,14 @@ def apply_for_loan(store_id: int, product_id: int, amount: Decimal, term_days: i
 def approve_loan(application_id: int, approved_amount: Decimal) -> LoanApplication:
     """Approve a loan application and set terms."""
     app = db.session.get(LoanApplication, application_id)
-    if not app or app.status != "APPLIED":
+    if not app or app.status != "PENDING":
         raise LoanError("Application not in a state that can be approved.")
 
-    product = db.session.get(LoanProduct, app.product_id)
+    product = db.session.get(LoanProduct, app.loan_product_id)
 
     app.status = "APPROVED"
     app.approved_amount = approved_amount
-    app.interest_rate_at_origination = product.interest_rate_bps
+    app.interest_rate = float(product.base_interest_rate)
     app.decision_at = datetime.now(timezone.utc)
 
     db.session.flush()
@@ -67,8 +67,10 @@ def disburse_loan(application_id: int) -> uuid.UUID:
 
     # 1. Update loan status
     app.status = "DISBURSED"
-    app.disbursement_date = datetime.now(timezone.utc).date()
-    app.maturity_date = app.disbursement_date + timedelta(days=app.term_days)
+    app.disbursed_at = datetime.now(timezone.utc)
+    app.disbursement_date = app.disbursed_at.date()
+    # Assuming maturity is tenure from disbursement
+    app.due_date = app.disbursed_at + timedelta(days=app.tenure_days)
     app.outstanding_principal = app.approved_amount
 
     # 2. Record ledger transaction
@@ -79,13 +81,10 @@ def disburse_loan(application_id: int) -> uuid.UUID:
     txn_id = record_transaction(
         store_id=app.store_id,
         debit_account_type="OPERATING",
-        credit_account_type="ESCROW",  # Liability: the merchant now owes this money
+        credit_account_type="REVENUE",
         amount=app.approved_amount,
         description=f"Disbursement for Loan #{app.id}",
-        meta_data={"loan_id": app.id},
     )
-
-    db.session.flush()
     return txn_id
 
 
@@ -99,8 +98,7 @@ def record_repayment(loan_id: int, amount: Decimal) -> uuid.UUID:
         raise LoanError("Repayment amount must be positive.")
 
     # Extremely simplified interest/principal split
-    # In reality, this used an amortization schedule
-    interest_component = round(app.outstanding_principal * Decimal(app.interest_rate_at_origination / 10000 / 12), 2)
+    interest_component = round(app.outstanding_principal * Decimal((app.interest_rate or 0) / 100 / 12), 2)
     principal_component = amount - interest_component
 
     if principal_component > app.outstanding_principal:
@@ -110,29 +108,27 @@ def record_repayment(loan_id: int, amount: Decimal) -> uuid.UUID:
     # 1. Update ledger
     txn_id = record_transaction(
         store_id=app.store_id,
-        debit_account_type="ESCROW",  # Decreasing liability
-        credit_account_type="OPERATING",  # Decreasing cash/operating
+        debit_account_type="REVENUE",
+        credit_account_type="OPERATING",
         amount=amount,
         description=f"Repayment for Loan #{app.id}",
-        meta_data={"loan_id": app.id},
     )
 
     # 2. Update loan record
     app.outstanding_principal -= principal_component
     app.total_interest_paid += interest_component
-    app.status = "REPAYING"
 
     if app.outstanding_principal <= 0:
-        app.status = "PAID_OFF"
-        app.outstanding_principal = 0
+        app.status = "CLOSED"
+    else:
+        app.status = "REPAYING"
 
     repayment = LoanRepayment(
-        loan_id=app.id,
-        ledger_transaction_id=txn_id,
+        loan_application_id=app.id,
         amount=amount,
         principal_component=principal_component,
         interest_component=interest_component,
-        repaid_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
     )
     db.session.add(repayment)
 

@@ -32,6 +32,9 @@ class FakeRedis:
     def delete(self, key):
         self.data.pop(key, None)
 
+    def ping(self):
+        return True
+
 
 # ─── Unit tests for app.email ────────────────────────────────────────────────
 
@@ -140,7 +143,9 @@ def test_registration_requires_email(client, app, monkeypatch):
     assert resp.status_code == 422
     data = resp.get_json()
     assert data["success"] is False
-    assert "email" in str(data["error"]).lower()
+    # Check for 'email' error in the error object (which might be a dict)
+    errors = str(data.get("error", "")).lower()
+    assert "email" in errors
 
 
 def test_registration_sends_otp_email(client, app, monkeypatch):

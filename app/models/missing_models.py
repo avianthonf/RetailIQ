@@ -127,6 +127,7 @@ class WebhookEvent(Base):
     last_response_code: Mapped[int | None] = mapped_column(Integer)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 

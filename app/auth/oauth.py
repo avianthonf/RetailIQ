@@ -1,129 +1,158 @@
+"""
+RetailIQ OAuth 2.0 Helpers
+===========================
+Authorization code flow, client credentials, and token management.
+"""
+
+import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-import jwt
-from flask import current_app
+import bcrypt
 
-from app import db
-from app.auth.utils import get_redis_client
-from app.models import DeveloperApplication
+logger = logging.getLogger(__name__)
 
 
-def generate_auth_code(client_id, user_id, scopes):
+def get_redis_client():
+    from ..utils.redis import get_redis_client as _get
+
+    return _get()
+
+
+def _get_redis():
+    return get_redis_client()
+
+
+def generate_auth_code(client_id: str, user_id: int, scopes: list) -> str:
     """
-    Generate an authorization code and store it in Redis with 10-minute TTL.
+    Generate a one-time authorization code stored in Redis for 5 minutes.
     """
     code = secrets.token_urlsafe(32)
-    redis_client = get_redis_client()
-    data = {
-        "client_id": client_id,
-        "user_id": str(user_id),
-        "scopes": ",".join(scopes) if scopes else "",
-    }
-    # Store with prefix 'oauth_code:'
-    redis_client.hset(f"oauth_code:{code}", mapping=data)
-    redis_client.expire(f"oauth_code:{code}", 600)
+    try:
+        redis = _get_redis()
+        import json
+
+        redis.setex(
+            f"oauth_code:{code}",
+            300,
+            json.dumps({"client_id": client_id, "user_id": user_id, "scopes": scopes}),
+        )
+    except Exception as exc:
+        logger.warning("Redis unavailable for auth code: %s", exc)
     return code
 
 
-def verify_auth_code(code, client_id):
+def verify_auth_code(code: str, client_id: str) -> dict | None:
     """
-    Verify the auth code and return associated data if valid.
-    Code is deleted after verification (one-time use).
+    Verify authorization code. Returns {user_id, scopes} or None.
+    Consumes the code (single use).
     """
-    redis_client = get_redis_client()
-    key = f"oauth_code:{code}"
-    data = redis_client.hgetall(key)
+    try:
+        import json
 
-    if not data:
+        redis = _get_redis()
+        raw = redis.get(f"oauth_code:{code}")
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if data.get("client_id") != client_id:
+            return None
+        redis.delete(f"oauth_code:{code}")
+        return {"user_id": data["user_id"], "scopes": data["scopes"]}
+    except Exception as exc:
+        logger.warning("Redis unavailable for code verification: %s", exc)
         return None
 
-    if data.get("client_id") != client_id:
+
+def verify_client_credentials(client_id: str | None, client_secret: str | None):
+    """
+    Verify OAuth client credentials. Returns DeveloperApplication or None.
+    """
+    if not client_id or not client_secret:
+        return None
+    try:
+        from app import db
+        from app.models import DeveloperApplication
+
+        app_obj = db.session.query(DeveloperApplication).filter_by(client_id=client_id).first()
+        if not app_obj:
+            logger.debug("OAuth: Client ID %s not found", client_id)
+            return None
+        if app_obj.status != "ACTIVE":
+            logger.debug("OAuth: Client ID %s is not ACTIVE (status: %s)", client_id, app_obj.status)
+            return None
+
+        if bcrypt.checkpw(client_secret.encode(), app_obj.client_secret_hash.encode()):
+            return app_obj
+        logger.debug("OAuth: Client ID %s secret mismatch", client_id)
+        return None
+    except Exception as exc:
+        logger.error("Error verifying client credentials: %s", exc)
         return None
 
-    redis_client.delete(key)
-    return {
-        "user_id": int(data["user_id"]),
-        "scopes": data["scopes"].split(",") if data["scopes"] else [],
-    }
 
-
-def generate_oauth_tokens(app_id, user_id=None, scopes=None):
+def generate_oauth_tokens(app_id: int, user_id: int | None = None, scopes: list | None = None) -> dict:
     """
-    Generate Access and Refresh tokens for a developer application.
+    Generate OAuth access + refresh token pair for a developer application.
     """
-    private_key = current_app.config["JWT_PRIVATE_KEY"]
-    now = datetime.now(timezone.utc)
+    import json
 
-    # Access Token (short-lived, 1 hour by default for OAuth)
-    access_payload = {
-        "sub": str(user_id) if user_id else f"app_{app_id}",
-        "app_id": str(app_id),
-        "type": "access",
-        "scopes": scopes or [],
-        "iat": now.timestamp(),
-        "exp": (now + timedelta(hours=1)).timestamp(),
-    }
-    access_token = jwt.encode(access_payload, private_key, algorithm="RS256")
+    access_token = secrets.token_urlsafe(48)
+    refresh_token = secrets.token_urlsafe(48)
+    scopes = scopes or []
 
-    # Refresh Token (long-lived)
-    refresh_token = secrets.token_urlsafe(64)
-    redis_client = get_redis_client()
-    refresh_data = {
-        "app_id": str(app_id),
-        "user_id": str(user_id) if user_id else "",
-        "scopes": ",".join(scopes) if scopes else "",
-    }
-    redis_client.hset(f"oauth_refresh:{refresh_token}", mapping=refresh_data)
-    # 30 days expiry
-    redis_client.expire(f"oauth_refresh:{refresh_token}", 30 * 24 * 3600)
+    data = {"app_id": app_id, "user_id": user_id, "scopes": scopes}
+    try:
+        redis = _get_redis()
+        redis.setex(f"oauth_access:{access_token}", 3600, json.dumps(data))  # 1 hour
+        redis.setex(f"oauth_refresh:{refresh_token}", 86400 * 30, json.dumps(data))  # 30 days
+    except Exception as exc:
+        logger.warning("Redis unavailable for OAuth tokens: %s", exc)
 
     return {
         "access_token": access_token,
-        "refresh_token": refresh_token,
         "token_type": "Bearer",
         "expires_in": 3600,
-        "scope": " ".join(scopes) if scopes else "",
+        "refresh_token": refresh_token,
+        "scope": " ".join(scopes),
     }
 
 
-def refresh_oauth_token(refresh_token, client_id, client_secret):
-    """
-    Exchange a refresh token for a new access token.
-    """
-    redis_client = get_redis_client()
-    key = f"oauth_refresh:{refresh_token}"
-    data = redis_client.hgetall(key)
+def refresh_oauth_token(refresh_token: str, client_id: str, client_secret: str) -> dict | None:
+    """Refresh OAuth tokens. Returns new token dict or None."""
+    try:
+        import json
 
-    if not data:
+        redis = _get_redis()
+        raw = redis.get(f"oauth_refresh:{refresh_token}")
+        if not raw:
+            return None
+        data = json.loads(raw)
+
+        # Verify client still valid
+        app_obj = verify_client_credentials(client_id, client_secret)
+        if not app_obj or app_obj.id != data.get("app_id"):
+            return None
+
+        # Revoke old refresh token
+        redis.delete(f"oauth_refresh:{refresh_token}")
+
+        return generate_oauth_tokens(data["app_id"], data.get("user_id"), data.get("scopes", []))
+    except Exception as exc:
+        logger.warning("Redis unavailable for OAuth refresh: %s", exc)
         return None
 
-    app_id = int(data["app_id"])
-    app = db.session.get(DeveloperApplication, app_id)
 
-    if not app or app.client_id != client_id:
+def verify_oauth_token(token: str) -> dict | None:
+    """Verify OAuth access token. Returns token data or None."""
+    try:
+        import json
+
+        redis = _get_redis()
+        raw = redis.get(f"oauth_access:{token}")
+        if not raw:
+            return None
+        return json.loads(raw)
+    except Exception as exc:
+        logger.warning("Redis unavailable for OAuth verification: %s", exc)
         return None
-
-    # Verify client secret (this should be done in the caller or here)
-    # We'll assume the caller verifies the client_secret before calling this.
-
-    user_id = int(data["user_id"]) if data.get("user_id") else None
-    scopes = data["scopes"].split(",") if data["scopes"] else []
-
-    return generate_oauth_tokens(app_id, user_id, scopes)
-
-
-def verify_client_credentials(client_id, client_secret):
-    """
-    Verify client_id and client_secret (hashed).
-    """
-    import bcrypt
-
-    app = db.session.query(DeveloperApplication).filter_by(client_id=client_id).first()
-    if not app:
-        return None
-
-    if bcrypt.checkpw(client_secret.encode(), app.client_secret_hash.encode()):
-        return app
-
-    return None

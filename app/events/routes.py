@@ -3,15 +3,15 @@ from datetime import date, datetime, timedelta, timezone
 from flask import g, request
 from sqlalchemy import and_, or_, text
 
-from app import db
-from app.auth.decorators import require_auth
-from app.auth.utils import format_response
-from app.events import events_bp
-from app.forecasting.engine import generate_demand_forecast
-from app.models import BusinessEvent, Product
+from .. import db
+from ..auth.decorators import require_auth
+from ..auth.utils import format_response
+from ..forecasting.engine import generate_demand_forecast
+from ..models import BusinessEvent, Product
+from . import events_bp
 
 
-@events_bp.route("/events", methods=["GET"])
+@events_bp.route("", methods=["GET"])
 @require_auth
 def list_events():
     """List store business events, optionally filtered by ?from=YYYY-MM-DD & to=YYYY-MM-DD."""
@@ -26,14 +26,18 @@ def list_events():
             from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
             query = query.filter(BusinessEvent.end_date >= from_date)
         except ValueError:
-            return format_response(error={"code": "INVALID_DATE", "message": "Invalid from date format"}), 422
+            return format_response(
+                success=False, error={"code": "INVALID_DATE", "message": "Invalid from date format"}
+            ), 422
 
     if to_date_str:
         try:
             to_date = datetime.strptime(to_date_str, "%Y-%m-%d").date()
             query = query.filter(BusinessEvent.start_date <= to_date)
         except ValueError:
-            return format_response(error={"code": "INVALID_DATE", "message": "Invalid to date format"}), 422
+            return format_response(
+                success=False, error={"code": "INVALID_DATE", "message": "Invalid to date format"}
+            ), 422
 
     events = query.order_by(BusinessEvent.start_date.asc()).all()
 
@@ -54,7 +58,7 @@ def list_events():
     return format_response(data=data)
 
 
-@events_bp.route("/events", methods=["POST"])
+@events_bp.route("", methods=["POST"])
 @require_auth
 def create_event():
     """Create a new business event."""
@@ -63,20 +67,26 @@ def create_event():
 
     required_fields = ["event_name", "event_type", "start_date", "end_date"]
     if not all(k in payload for k in required_fields):
-        return format_response(error={"code": "VALIDATION_ERROR", "message": "Missing required fields"}), 422
+        return format_response(
+            success=False, error={"code": "VALIDATION_ERROR", "message": "Missing required fields"}
+        ), 422
 
     try:
         start_date = datetime.strptime(payload["start_date"], "%Y-%m-%d").date()
         end_date = datetime.strptime(payload["end_date"], "%Y-%m-%d").date()
     except ValueError:
-        return format_response(error={"code": "INVALID_DATE", "message": "Invalid date format, use YYYY-MM-DD"}), 422
+        return format_response(
+            success=False, error={"code": "INVALID_DATE", "message": "Invalid date format, use YYYY-MM-DD"}
+        ), 422
 
     if start_date > end_date:
-        return format_response(error={"code": "VALIDATION_ERROR", "message": "start_date must be <= end_date"}), 422
+        return format_response(
+            success=False, error={"code": "VALIDATION_ERROR", "message": "start_date must be <= end_date"}
+        ), 422
 
     event_type = payload["event_type"]
     if event_type not in {"HOLIDAY", "FESTIVAL", "PROMOTION", "SALE_DAY", "CLOSURE"}:
-        return format_response(error={"code": "VALIDATION_ERROR", "message": "Invalid event_type"}), 422
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": "Invalid event_type"}), 422
 
     impact = payload.get("expected_impact_pct")
     if impact is not None:
@@ -99,7 +109,7 @@ def create_event():
     return format_response(data={"id": str(event.id), "status": "CREATED"}), 201
 
 
-@events_bp.route("/events/<uuid:event_id>", methods=["PUT"])
+@events_bp.route("/<uuid:event_id>", methods=["PUT"])
 @require_auth
 def update_event(event_id):
     """Update an existing event."""
@@ -107,7 +117,7 @@ def update_event(event_id):
     event = db.session.query(BusinessEvent).filter_by(id=event_id, store_id=store_id).first()
 
     if not event:
-        return format_response(error={"code": "NOT_FOUND", "message": "Event not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Event not found"}), 404
 
     payload = request.get_json() or {}
 
@@ -115,7 +125,9 @@ def update_event(event_id):
         event.event_name = payload["event_name"]
     if "event_type" in payload:
         if payload["event_type"] not in {"HOLIDAY", "FESTIVAL", "PROMOTION", "SALE_DAY", "CLOSURE"}:
-            return format_response(error={"code": "VALIDATION_ERROR", "message": "Invalid event_type"}), 422
+            return format_response(
+                success=False, error={"code": "VALIDATION_ERROR", "message": "Invalid event_type"}
+            ), 422
         event.event_type = payload["event_type"]
     if "start_date" in payload:
         event.start_date = datetime.strptime(payload["start_date"], "%Y-%m-%d").date()
@@ -130,13 +142,15 @@ def update_event(event_id):
         event.recurrence_rule = payload["recurrence_rule"]
 
     if event.start_date > event.end_date:
-        return format_response(error={"code": "VALIDATION_ERROR", "message": "start_date must be <= end_date"}), 422
+        return format_response(
+            success=False, error={"code": "VALIDATION_ERROR", "message": "start_date must be <= end_date"}
+        ), 422
 
     db.session.commit()
     return format_response(data={"id": str(event.id), "status": "UPDATED"})
 
 
-@events_bp.route("/events/<uuid:event_id>", methods=["DELETE"])
+@events_bp.route("/<uuid:event_id>", methods=["DELETE"])
 @require_auth
 def delete_event(event_id):
     """Delete an event."""
@@ -144,7 +158,7 @@ def delete_event(event_id):
     event = db.session.query(BusinessEvent).filter_by(id=event_id, store_id=store_id).first()
 
     if not event:
-        return format_response(error={"code": "NOT_FOUND", "message": "Event not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Event not found"}), 404
 
     db.session.delete(event)
     db.session.commit()
@@ -152,7 +166,7 @@ def delete_event(event_id):
     return format_response(data={"status": "DELETED"})
 
 
-@events_bp.route("/events/upcoming", methods=["GET"])
+@events_bp.route("/upcoming", methods=["GET"])
 @require_auth
 def upcoming_events():
     """List next X days of events."""
@@ -162,7 +176,9 @@ def upcoming_events():
     try:
         days = int(days_str)
     except ValueError:
-        return format_response(error={"code": "VALIDATION_ERROR", "message": "days must be an integer"}), 422
+        return format_response(
+            success=False, error={"code": "VALIDATION_ERROR", "message": "days must be an integer"}
+        ), 422
 
     today = datetime.now(timezone.utc).date()
     horizon_date = today + timedelta(days=days)
@@ -202,11 +218,11 @@ def demand_sensing(product_id):
     # Verify product belongs to store
     prod = db.session.query(Product).filter_by(product_id=product_id, store_id=store_id).first()
     if not prod:
-        return format_response(error={"code": "NOT_FOUND", "message": "Product not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Product not found"}), 404
 
     try:
         # Call forecasting engine (to be implemented in engine.py)
         result = generate_demand_forecast(store_id, product_id, db.session, horizon=14)
         return format_response(data=result)
     except Exception as e:
-        return format_response(error={"code": "FORECAST_ERROR", "message": str(e)}), 500
+        return format_response(success=False, error={"code": "FORECAST_ERROR", "message": str(e)}), 500

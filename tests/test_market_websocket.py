@@ -17,7 +17,7 @@ def reset_socketio():
 def test_init_websockets_with_socketio():
     app = MagicMock()
     with (
-        patch("app.market_intelligence.websocket.SocketIO") as mock_socketio,
+        patch("app.market_intelligence.websocket.SocketIO", create=True) as mock_socketio,
         patch("app.market_intelligence.websocket.has_socketio", True),
     ):
         init_websockets(app)

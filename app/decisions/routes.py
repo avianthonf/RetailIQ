@@ -2,9 +2,9 @@ import time
 
 from flask import Blueprint, jsonify
 
-from app import db
-from app.auth.decorators import require_auth
-from app.decisions.engine import build_context, evaluate_rules
+from .. import db
+from ..auth.decorators import require_auth
+from .engine import build_context, evaluate_rules
 
 decisions_bp = Blueprint("decisions", __name__)
 
@@ -25,7 +25,7 @@ def get_decisions():
     duration_ms = (time.time() - start) * 1000
 
     # Check if WhatsApp is active
-    from app.models import WhatsAppConfig
+    from ..models import WhatsAppConfig
 
     wa_config = db.session.query(WhatsAppConfig).filter_by(store_id=store_id, is_active=True).first()
     wa_enabled = wa_config is not None and bool(wa_config.access_token_encrypted)

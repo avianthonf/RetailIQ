@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from flask import g, request
 from marshmallow import ValidationError
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from .. import db
 from ..auth.decorators import require_auth, require_role
@@ -16,7 +16,7 @@ from .utils import validate_gstin
 # ── GST Config ──────────────────────────────────────────────────────
 
 
-@gst_bp.route("/gst/config", methods=["GET"])
+@gst_bp.route("/config", methods=["GET"])
 @require_auth
 def get_gst_config():
     store_id = g.current_user["store_id"]
@@ -24,7 +24,7 @@ def get_gst_config():
     if not config:
         return format_response(
             True, data={"gstin": None, "registration_type": "REGULAR", "state_code": None, "is_gst_enabled": False}
-        ), 200
+        )
     return format_response(
         True,
         data={
@@ -33,26 +33,26 @@ def get_gst_config():
             "state_code": config.state_code,
             "is_gst_enabled": config.is_gst_enabled,
         },
-    ), 200
+    )
 
 
-@gst_bp.route("/gst/config", methods=["PUT"])
+@gst_bp.route("/config", methods=["PUT"])
 @require_auth
 @require_role("owner")
 def update_gst_config():
     try:
         data = GSTConfigUpsertSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(
+            success=False, error={"code": "VALIDATION_ERROR", "message": err.messages}, status_code=400
+        )
 
     store_id = g.current_user["store_id"]
 
     # Validate GSTIN if provided
     gstin = data.get("gstin")
     if gstin and not validate_gstin(gstin):
-        return format_response(
-            False, error={"code": "INVALID_GSTIN", "message": "Invalid GSTIN format or checksum"}
-        ), 422
+        return format_response(False, error={"code": "INVALID_GSTIN", "message": "Invalid GSTIN format or checksum"})
 
     config = db.session.query(StoreGSTConfig).filter_by(store_id=store_id).first()
     if not config:
@@ -72,24 +72,22 @@ def update_gst_config():
             "state_code": config.state_code,
             "is_gst_enabled": config.is_gst_enabled,
         },
-    ), 200
+    )
 
 
 # ── HSN Search ──────────────────────────────────────────────────────
 
 
-@gst_bp.route("/gst/hsn-search", methods=["GET"])
+@gst_bp.route("/hsn-search", methods=["GET"])
 @require_auth
 def hsn_search():
     q = request.args.get("q", "").strip()
     if not q:
-        return format_response(
-            False, error={"code": "MISSING_QUERY", "message": "Query parameter 'q' is required"}
-        ), 400
+        return format_response(False, error={"code": "MISSING_QUERY", "message": "Query parameter 'q' is required"})
 
     results = (
         db.session.query(HSNMaster)
-        .filter(db.or_(HSNMaster.hsn_code.like(f"{q}%"), HSNMaster.description.ilike(f"%{q}%")))
+        .filter(or_(HSNMaster.hsn_code.like(f"{q}%"), HSNMaster.description.ilike(f"%{q}%")))
         .limit(10)
         .all()
     )
@@ -103,21 +101,25 @@ def hsn_search():
         for r in results
     ]
 
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data, status_code=200)
 
 
 # ── GST Summary ─────────────────────────────────────────────────────
 
 
-@gst_bp.route("/gst/summary", methods=["GET"])
+@gst_bp.route("/summary", methods=["GET"])
 @require_auth
 def gst_summary():
     store_id = g.current_user["store_id"]
     period = request.args.get("period")
     if not period:
         return format_response(
-            False, error={"code": "MISSING_PERIOD", "message": "Query parameter 'period' (YYYY-MM) is required"}
-        ), 400
+            False,
+            error={
+                "code": "MISSING_PERIOD",
+                "message": "Query parameter 'period' (YYYY-MM, status_code=400) is required",
+            },
+        )
 
     filing = db.session.query(GSTFilingPeriod).filter_by(store_id=store_id, period=period).first()
     if filing:
@@ -133,8 +135,7 @@ def gst_summary():
                 "status": filing.status,
                 "compiled_at": filing.compiled_at.isoformat() if filing.compiled_at else None,
             },
-        ), 200
-
+        )
     # Trigger compilation if missing
     from app.tasks.tasks import compile_monthly_gst
 
@@ -166,27 +167,31 @@ def gst_summary():
             "status": "PENDING",
             "compiled_at": None,
         },
-    ), 200
+    )
 
 
 # ── GSTR-1 JSON ─────────────────────────────────────────────────────
 
 
-@gst_bp.route("/gst/gstr1", methods=["GET"])
+@gst_bp.route("/gstr1", methods=["GET"])
 @require_auth
 def get_gstr1():
     store_id = g.current_user["store_id"]
     period = request.args.get("period")
     if not period:
         return format_response(
-            False, error={"code": "MISSING_PERIOD", "message": "Query parameter 'period' (YYYY-MM) is required"}
-        ), 400
+            False,
+            error={
+                "code": "MISSING_PERIOD",
+                "message": "Query parameter 'period' (YYYY-MM, status_code=400) is required",
+            },
+        )
 
     filing = db.session.query(GSTFilingPeriod).filter_by(store_id=store_id, period=period).first()
     if not filing or not filing.gstr1_json_path:
         return format_response(
             False, error={"code": "NOT_FOUND", "message": f"GSTR-1 not compiled for period {period}"}
-        ), 404
+        )
 
     import json
     import os
@@ -194,23 +199,29 @@ def get_gstr1():
     if os.path.exists(filing.gstr1_json_path):
         with open(filing.gstr1_json_path) as f:
             gstr1_data = json.load(f)
-        return format_response(True, data=gstr1_data), 200
+        return format_response(success=True, data=gstr1_data, status_code=200)
 
-    return format_response(False, error={"code": "NOT_FOUND", "message": "GSTR-1 JSON file not found"}), 404
+    return format_response(
+        success=False, error={"code": "NOT_FOUND", "message": "GSTR-1 JSON file not found"}, status_code=404
+    )
 
 
 # ── Liability Slabs ──────────────────────────────────────────────────
 
 
-@gst_bp.route("/gst/liability-slabs", methods=["GET"])
+@gst_bp.route("/liability-slabs", methods=["GET"])
 @require_auth
 def liability_slabs():
     store_id = g.current_user["store_id"]
     period = request.args.get("period")
     if not period:
         return format_response(
-            False, error={"code": "MISSING_PERIOD", "message": "Query parameter 'period' (YYYY-MM) is required"}
-        ), 400
+            False,
+            error={
+                "code": "MISSING_PERIOD",
+                "message": "Query parameter 'period' (YYYY-MM, status_code=400) is required",
+            },
+        )
 
     gst_txns = db.session.query(GSTTransaction).filter_by(store_id=store_id, period=period).all()
 
@@ -230,4 +241,4 @@ def liability_slabs():
             )
 
     slabs = sorted(slab_map.values(), key=lambda x: x["rate"])
-    return format_response(True, data=slabs), 200
+    return format_response(success=True, data=slabs, status_code=200)

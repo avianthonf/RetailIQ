@@ -32,7 +32,7 @@ def get_translations():
 
     catalog = {key: value for key, value in results}
 
-    return format_response(True, data={"locale": locale, "catalog": catalog})
+    return format_response(success=True, data={"locale": locale, "catalog": catalog})
 
 
 @i18n_bp.route("/i18n/currencies", methods=["GET"])
@@ -54,7 +54,7 @@ def get_supported_currencies():
         for c in currencies
     ]
 
-    return format_response(True, data=data)
+    return format_response(success=True, data=data)
 
 
 @i18n_bp.route("/i18n/countries", methods=["GET"])
@@ -78,4 +78,4 @@ def get_supported_countries():
         for c in countries
     ]
 
-    return format_response(True, data=data)
+    return format_response(success=True, data=data)

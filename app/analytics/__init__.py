@@ -1,1 +1,1 @@
-from .routes import analytics_bp
+from .routes import analytics_bp  # noqa: F401

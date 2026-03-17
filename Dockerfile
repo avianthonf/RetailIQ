@@ -1,42 +1,44 @@
 FROM python:3.10-slim
 
-# Install system dependencies
+# ── System dependencies ───────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     build-essential \
     libpq-dev \
     curl \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Create non-root user BEFORE installing packages ───────────────────────────
+# pip installs into system site-packages (root-owned) — no chown needed later.
+RUN useradd --create-home --shell /bin/bash --uid 1001 app
 
 WORKDIR /app
 
-# Upgrade pip once
+# ── Python dependencies (root installs into system site-packages) ─────────────
 RUN pip install --no-cache-dir --upgrade pip
 
-# Install core dependencies first (rarely changes)
-COPY requirements-core.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements-core.txt
+COPY requirements-core.txt requirements-core.txt
+RUN pip install --no-cache-dir -r requirements-core.txt
 
-# Install ML dependencies (changes less frequently)
-COPY requirements-ml.txt .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements-ml.txt
+COPY requirements-ml.txt requirements-ml.txt
+RUN pip install --no-cache-dir -r requirements-ml.txt
 
-# Copy application code
-COPY . .
+# ── Application source — owned by app at copy time, no recursive chown ────────
+COPY --chown=app:app . .
 
-# Create non-root user
-RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
 USER app
 
-# Expose port
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:5000", \
+     "--workers", "2", \
+     "--threads", "2", \
+     "--timeout", "120", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "wsgi:app"]

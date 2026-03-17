@@ -31,7 +31,7 @@ def list_kyc_providers():
         }
         for p in providers
     ]
-    return format_response(True, data=data)
+    return format_response(success=True, data=data)
 
 
 @kyc_bp.route("/kyc/verify", methods=["POST"])
@@ -43,14 +43,14 @@ def verify_kyc():
         id_number = data["id_number"]
         country_code = data.get("country_code", "IN")
     except KeyError as e:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": f"Missing field {e}"}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": f"Missing field {e}"})
 
     store_id = g.current_user["store_id"]
     user_id = g.current_user["user_id"]
 
     provider = db.session.query(KYCProvider).filter_by(code=provider_code).first()
     if not provider:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "KYC provider not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "KYC provider not found"})
 
     try:
         adapter = get_kyc_adapter(provider_code, store_id)
@@ -70,13 +70,13 @@ def verify_kyc():
         db.session.add(record)
         db.session.commit()
 
-        return format_response(True, data={"status": record.verification_status, "details": result}), 200
+        return format_response(success=True, data={"status": record.verification_status, "details": result})
 
     except ValueError as e:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": str(e)}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": str(e)})
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return format_response(success=False, error={"code": "SERVER_ERROR", "message": str(e)})
 
 
 @kyc_bp.route("/kyc/status", methods=["GET"])
@@ -101,4 +101,4 @@ def kyc_status():
         for record, provider_name in records
     ]
 
-    return format_response(True, data=data)
+    return format_response(success=True, data=data)

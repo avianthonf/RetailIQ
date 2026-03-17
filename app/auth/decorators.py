@@ -1,110 +1,102 @@
+"""
+RetailIQ Auth Decorators
+=========================
+JWT authentication and role-based access control decorators.
+"""
+
+import logging
 from functools import wraps
 
-import jwt
-from flask import current_app, g, request
+from flask import g, request
 
-from app import db
-from app.models import RBACPermission
+from .utils import decode_access_token, format_response
 
-from .utils import format_response
+logger = logging.getLogger(__name__)
 
 
 def require_auth(f):
+    """
+    Decorator: validates Bearer JWT token and populates g.current_user.
+    g.current_user = {"user_id": int, "store_id": int|None, "role": str, ...}
+    """
+
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
             return format_response(
-                False, error={"code": "UNAUTHORIZED", "message": "Missing or invalid token"}, meta=None
-            ), 401
-
-        token = auth_header.split(" ")[1]
-        try:
-            public_key = current_app.config["JWT_PUBLIC_KEY"]
-            # Explicitly enforce RS256 and validate standard claims
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                options={
-                    "require": ["exp", "iat", "user_id", "role", "store_id"],
-                    "verify_iat": True,
-                },
+                success=False,
+                message="Authentication required",
+                status_code=401,
+                error={"code": "MISSING_TOKEN", "message": "Bearer token required"},
             )
-            g.current_user = payload
-        except jwt.ExpiredSignatureError:
-            return format_response(
-                False, error={"code": "TOKEN_EXPIRED", "message": "Token has expired"}, meta=None
-            ), 401
-        except jwt.InvalidTokenError as e:
-            # Log the specific error for debugging but return generic message
-            current_app.logger.warning(f"JWT Verification Failed: {e}")
-            return format_response(False, error={"code": "INVALID_TOKEN", "message": "Invalid token"}, meta=None), 401
 
+        token = auth_header[7:]
+        payload = decode_access_token(token)
+        if not payload:
+            return format_response(
+                success=False,
+                message="Invalid or expired token",
+                status_code=401,
+                error={"code": "INVALID_TOKEN", "message": "Token is invalid or has expired"},
+            )
+
+        g.current_user = payload
         return f(*args, **kwargs)
 
     return decorated
 
 
 def require_role(*roles):
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not getattr(g, "current_user", None):
-                return format_response(
-                    False, error={"code": "UNAUTHORIZED", "message": "User not authenticated"}, meta=None
-                ), 401
-
-            if g.current_user.get("role") not in roles:
-                return format_response(
-                    False,
-                    error={"code": "FORBIDDEN", "message": f"Requires one of roles: {', '.join(roles)}"},
-                    meta=None,
-                ), 403
-
-            return f(*args, **kwargs)
-
-        return decorated_function
-
-    return decorator
-
-
-def require_permission(resource, action):
     """
-    Decorator to enforce fine-grained RBAC permissions.
-    Checks if the user's role has entry in rbac_permissions table.
+    Decorator: requires g.current_user["role"] to be in `roles`.
+    Must be used after @require_auth.
+
+    Usage:
+        @require_role("owner")
+        @require_role("owner", "manager")
     """
 
     def decorator(f):
         @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if not getattr(g, "current_user", None):
+        def decorated(*args, **kwargs):
+            user = getattr(g, "current_user", None)
+            if not user:
                 return format_response(
-                    False, error={"code": "UNAUTHORIZED", "message": "User not authenticated"}, meta=None
-                ), 401
-
-            role = g.current_user.get("role")
-            if not role:
+                    success=False,
+                    message="Authentication required",
+                    status_code=401,
+                    error={"code": "UNAUTHORIZED"},
+                )
+            if user.get("role") not in roles:
                 return format_response(
-                    False, error={"code": "FORBIDDEN", "message": "User role not found in token"}, meta=None
-                ), 403
-
-            # Check for specific permission in DB
-            permission = db.session.query(RBACPermission).filter_by(role=role, resource=resource, action=action).first()
-
-            # Owner usually has all permissions (bypass or seed)
-            if not permission and role != "owner":
-                return format_response(
-                    False,
-                    error={
-                        "code": "FORBIDDEN",
-                        "message": f"Requires '{action}' permission on '{resource}'",
-                    },
-                    meta=None,
-                ), 403
-
+                    success=False,
+                    message=f"Access restricted to: {', '.join(roles)}",
+                    status_code=403,
+                    error={"code": "FORBIDDEN", "message": f"Requires role: {', '.join(roles)}"},
+                )
             return f(*args, **kwargs)
 
-        return decorated_function
+        return decorated
 
     return decorator
+
+
+def optional_auth(f):
+    """
+    Decorator: tries to authenticate but doesn't block if no token.
+    Sets g.current_user if valid token present, otherwise g.current_user = None.
+    """
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        g.current_user = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = decode_access_token(token)
+            if payload:
+                g.current_user = payload
+        return f(*args, **kwargs)
+
+    return decorated

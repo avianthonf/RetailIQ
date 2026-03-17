@@ -54,7 +54,8 @@ def test_pricing_optimize_v2(client, owner_headers):
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["success"] is True
-    assert str(p.product_id) in data["data"] or p.product_id in data["data"]
+    # results is a list of dicts, check if p.product_id is in any dict
+    assert any(str(item["product_id"]) == str(p.product_id) for item in data["data"])
 
 
 def test_vision_shelf_v2(client, owner_headers):

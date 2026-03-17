@@ -8,11 +8,15 @@ We use StaticPool to force all SQLAlchemy connections (fixture sessions AND
 Flask request sessions) to share the exact same connection/DB instance.
 """
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import BigInteger
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
+
+import numpy_patch  # Compatibility for NumPy 2.0 (AttributeError: np.float_)
 
 
 # ── make Postgres-specific types work on SQLite ─────────────────────────────
@@ -82,6 +86,10 @@ def app():
             "RATELIMIT_STORAGE_URI": "memory://",
             "JWT_PRIVATE_KEY": private_key_pem,
             "JWT_PUBLIC_KEY": public_key_pem,
+            "JWT_SECRET_KEY": "dev-secret-key-12345",
+            "JWT_ACCESS_TOKEN_EXPIRES": 3600,
+            "JWT_REFRESH_TOKEN_EXPIRES": timedelta(days=30),
+            "JWT_ALGORITHM": "HS256",
         }
     )
 

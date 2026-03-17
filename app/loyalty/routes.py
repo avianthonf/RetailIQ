@@ -9,17 +9,19 @@ from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..auth.utils import format_response
 from ..models import CreditLedger, CreditTransaction, CustomerLoyaltyAccount, LoyaltyProgram, LoyaltyTransaction
-from . import loyalty_bp
+from . import credit_bp, loyalty_bp
 from .schemas import LoyaltyProgramUpsertSchema, RedeemPointsSchema, RepayCreditSchema
 
 
-@loyalty_bp.route("/loyalty/program", methods=["GET"])
+@loyalty_bp.route("/program", methods=["GET"])
 @require_auth
 def get_loyalty_program():
     store_id = g.current_user["store_id"]
     program = db.session.query(LoyaltyProgram).filter_by(store_id=store_id).first()
     if not program:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "No loyalty program configured"}), 404
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "No loyalty program configured"}
+        ), 404
 
     data = {
         "points_per_rupee": float(program.points_per_rupee),
@@ -28,17 +30,17 @@ def get_loyalty_program():
         "expiry_days": program.expiry_days,
         "is_active": program.is_active,
     }
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)
 
 
-@loyalty_bp.route("/loyalty/program", methods=["PUT"])
+@loyalty_bp.route("/program", methods=["PUT"])
 @require_auth
 @require_role("owner")
 def upsert_loyalty_program():
     try:
         data = LoyaltyProgramUpsertSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": err.messages})
 
     store_id = g.current_user["store_id"]
     program = db.session.query(LoyaltyProgram).filter_by(store_id=store_id).first()
@@ -51,18 +53,19 @@ def upsert_loyalty_program():
         setattr(program, key, value)
 
     db.session.commit()
-    return format_response(True, data={"message": "Loyalty program updated"}), 200
+    return format_response(success=True, data={"message": "Loyalty program updated"})
 
 
-@loyalty_bp.route("/loyalty/customers/<int:customer_id>", methods=["GET"])
-@loyalty_bp.route("/loyalty/customers/<int:customer_id>/account", methods=["GET"])
+@loyalty_bp.route("/customers/<int:customer_id>", methods=["GET"])
+@loyalty_bp.route("/customers/<int:customer_id>/account", methods=["GET"])
+@loyalty_bp.route("/credit/account/<int:customer_id>", methods=["GET"])
 @require_auth
 def get_customer_loyalty(customer_id):
     store_id = g.current_user["store_id"]
     account = db.session.query(CustomerLoyaltyAccount).filter_by(customer_id=customer_id, store_id=store_id).first()
 
     if not account:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Loyalty account not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Loyalty account not found"})
 
     txns = (
         db.session.query(LoyaltyTransaction)
@@ -90,17 +93,17 @@ def get_customer_loyalty(customer_id):
         "last_activity_at": account.last_activity_at.isoformat() if account.last_activity_at else None,
         "recent_transactions": recent_transactions,
     }
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)
 
 
-@loyalty_bp.route("/loyalty/customers/<int:customer_id>/transactions", methods=["GET"])
+@loyalty_bp.route("/customers/<int:customer_id>/transactions", methods=["GET"])
 @require_auth
 def get_loyalty_transactions(customer_id):
     store_id = g.current_user["store_id"]
     account = db.session.query(CustomerLoyaltyAccount).filter_by(customer_id=customer_id, store_id=store_id).first()
 
     if not account:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Loyalty account not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Loyalty account not found"})
 
     page = request.args.get("page", 1, type=int)
     limit = min(request.args.get("limit", 20, type=int), 100)
@@ -128,16 +131,16 @@ def get_loyalty_transactions(customer_id):
             }
         )
 
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)
 
 
-@loyalty_bp.route("/loyalty/customers/<int:customer_id>/redeem", methods=["POST"])
+@loyalty_bp.route("/customers/<int:customer_id>/redeem", methods=["POST"])
 @require_auth
 def redeem_loyalty_points(customer_id):
     try:
         data = RedeemPointsSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": err.messages})
 
     store_id = g.current_user["store_id"]
     points_to_redeem = Decimal(str(data["points_to_redeem"]))
@@ -177,24 +180,26 @@ def redeem_loyalty_points(customer_id):
         db.session.commit()
         return format_response(
             True, data={"message": "Points redeemed successfully", "remaining_points": float(account.total_points)}
-        ), 200
+        )
     except ValueError as e:
         db.session.rollback()
-        return format_response(False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)}), 422
+        return format_response(
+            success=False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)}, status_code=422
+        )
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return format_response(success=False, error={"code": "SERVER_ERROR", "message": str(e)})
 
 
-@loyalty_bp.route("/credit/customers/<int:customer_id>", methods=["GET"])
-@loyalty_bp.route("/credit/customers/<int:customer_id>/account", methods=["GET"])
+@credit_bp.route("/customers/<int:customer_id>", methods=["GET"])
+@credit_bp.route("/customers/<int:customer_id>/account", methods=["GET"])
 @require_auth
 def get_customer_credit(customer_id):
     store_id = g.current_user["store_id"]
     ledger = db.session.query(CreditLedger).filter_by(customer_id=customer_id, store_id=store_id).first()
 
     if not ledger:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Credit ledger not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Credit ledger not found"})
 
     txns = (
         db.session.query(CreditTransaction)
@@ -221,17 +226,17 @@ def get_customer_credit(customer_id):
         "updated_at": ledger.updated_at.isoformat() if ledger.updated_at else None,
         "recent_transactions": recent_transactions,
     }
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)
 
 
-@loyalty_bp.route("/credit/customers/<int:customer_id>/transactions", methods=["GET"])
+@credit_bp.route("/customers/<int:customer_id>/transactions", methods=["GET"])
 @require_auth
 def get_credit_transactions(customer_id):
     store_id = g.current_user["store_id"]
     ledger = db.session.query(CreditLedger).filter_by(customer_id=customer_id, store_id=store_id).first()
 
     if not ledger:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Credit ledger not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Credit ledger not found"})
 
     page = request.args.get("page", 1, type=int)
     limit = min(request.args.get("limit", 20, type=int), 100)
@@ -259,16 +264,16 @@ def get_credit_transactions(customer_id):
             }
         )
 
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)
 
 
-@loyalty_bp.route("/credit/customers/<int:customer_id>/repay", methods=["POST"])
+@credit_bp.route("/customers/<int:customer_id>/repay", methods=["POST"])
 @require_auth
 def repay_credit(customer_id):
     try:
         data = RepayCreditSchema().load(request.json)
     except ValidationError as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": err.messages}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": err.messages})
 
     store_id = g.current_user["store_id"]
     amount = Decimal(str(data["amount"]))
@@ -300,16 +305,16 @@ def repay_credit(customer_id):
         db.session.commit()
         return format_response(
             True, data={"message": "Repayment successful", "remaining_balance": float(ledger.balance)}
-        ), 200
+        )
     except ValueError as e:
         db.session.rollback()
-        return format_response(False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)}), 422
+        return format_response(success=False, error={"code": "UNPROCESSABLE_ENTITY", "message": str(e)})
     except Exception as e:
         db.session.rollback()
-        return format_response(False, error={"code": "SERVER_ERROR", "message": str(e)}), 500
+        return format_response(success=False, error={"code": "SERVER_ERROR", "message": str(e)})
 
 
-@loyalty_bp.route("/loyalty/analytics", methods=["GET"])
+@loyalty_bp.route("/analytics", methods=["GET"])
 @require_auth
 def loyalty_analytics():
     store_id = g.current_user["store_id"]
@@ -357,4 +362,4 @@ def loyalty_analytics():
         "points_redeemed_this_month": redeemed_abs,
         "redemption_rate_this_month": redemption_rate,
     }
-    return format_response(True, data=data), 200
+    return format_response(success=True, data=data)

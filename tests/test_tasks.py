@@ -53,6 +53,7 @@ def _create_transaction(store_id, items, dt):
         payment_mode="CASH",
         created_at=dt,
         is_return=False,
+        total_amount=sum(qty * price for prod_id, qty, price, disc in items),
     )
     db.session.add(txn)
     for prod_id, qty, price, disc in items:
@@ -95,7 +96,7 @@ def test_rebuild_daily_aggregates_and_evaluate_alerts(app, test_store, test_prod
 
     # Evaluate multiple times for deduplication checks
     for _ in range(3):
-        evaluate_alerts(test_store.store_id)
+        evaluate_alerts(store_id=test_store.store_id)
 
     alerts = db.session.query(Alert).filter_by(store_id=test_store.store_id, alert_type="LOW_STOCK").all()
     # Deduplication should keep it at 1

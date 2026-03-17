@@ -19,6 +19,7 @@ from .services import (
 )
 
 
+@transactions_bp.route("/", methods=["POST"])
 @transactions_bp.route("", methods=["POST"])
 @require_auth
 def create_transaction():
@@ -71,6 +72,7 @@ def create_transaction():
 
 
 @transactions_bp.route("/batch", methods=["POST"])
+@transactions_bp.route("/batch/", methods=["POST"])
 @require_auth
 def create_batch_transactions():
     try:
@@ -99,6 +101,7 @@ def create_batch_transactions():
     return standard_json(data=result)
 
 
+@transactions_bp.route("/", methods=["GET"])
 @transactions_bp.route("", methods=["GET"])
 @require_auth
 def get_transactions():

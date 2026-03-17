@@ -7,11 +7,9 @@ from app.utils.responses import standard_json
 from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..models import Category, Product, Store
+from . import store_bp
 from .schemas import CategorySchema, StoreProfileSchema, TaxConfigSchema
 from .services import StoreService
-
-store_bp = Blueprint("store", __name__)
-
 
 # ---------------------------------------------------------------------------
 # Store Profile  –  GET /api/v1/store/profile

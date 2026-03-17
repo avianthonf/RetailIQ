@@ -1,115 +1,132 @@
-import time
-from datetime import datetime, timezone
+"""
+RetailIQ Developer Gateway
+============================
+OAuth scope enforcement and API usage recording for /api/v2.
+"""
+
+import logging
 from functools import wraps
 
-import jwt
-from flask import current_app, g, jsonify, request
+from flask import g, request
 
-from app import db
-from app.auth.utils import get_redis_client
-from app.models import APIUsageRecord, Developer, DeveloperApplication
+from ..utils.redis import get_redis_client
+
+logger = logging.getLogger(__name__)
 
 
-def require_oauth(scopes=None):
+def get_redis():
+    """Wrapper to safely import redis client at runtime."""
+    from ..utils.redis import get_redis_client as _get
+
+    return _get()
+
+
+def require_oauth(scopes: list[str] | None = None):
     """
-    Decorator to require a valid OAuth access token and specific scopes.
+    Decorator: validates OAuth access token and verifies required scopes.
+    Populates g.oauth_app and g.oauth_scopes.
     """
 
     def decorator(f):
         @wraps(f)
-        def decorated_function(*args, **kwargs):
-            auth_header = request.headers.get("Authorization")
-            if not auth_header or not auth_header.startswith("Bearer "):
-                return jsonify({"error": "unauthorized", "message": "Missing or invalid Authorization header"}), 401
+        def decorated(*args, **kwargs):
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                from app.auth.utils import format_response
 
-            token = auth_header.split(" ")[1]
-            try:
-                public_key = current_app.config["JWT_PUBLIC_KEY"]
-                payload = jwt.decode(token, public_key, algorithms=["RS256"])
-            except jwt.ExpiredSignatureError:
-                return jsonify({"error": "token_expired", "message": "Access token has expired"}), 401
-            except jwt.InvalidTokenError:
-                return jsonify({"error": "invalid_token", "message": "Invalid access token"}), 401
+                return format_response(
+                    success=False,
+                    message="Bearer token required",
+                    status_code=401,
+                    error={"code": "MISSING_TOKEN"},
+                )
 
-            # Verify token type
-            if payload.get("type") != "access":
-                return jsonify({"error": "invalid_token", "message": "Not an access token"}), 401
+            token = auth_header[7:]
 
-            # Check scopes
-            token_scopes = payload.get("scopes", [])
+            from app.auth.oauth import verify_oauth_token
+
+            token_data = verify_oauth_token(token)
+
+            if not token_data:
+                from app.auth.utils import format_response
+
+                return format_response(
+                    success=False,
+                    message="Invalid or expired OAuth token",
+                    status_code=401,
+                    error={"code": "INVALID_TOKEN"},
+                )
+
+            # Scope check
             if scopes:
-                for s in scopes:
-                    if s not in token_scopes:
-                        return jsonify({"error": "insufficient_scope", "message": f"Missing scope: {s}"}), 403
+                token_scopes = set(token_data.get("scopes", []))
+                required = set(scopes)
+                missing = required - token_scopes
+                if missing:
+                    from app.auth.utils import format_response
 
-            # Attach app and user to g
-            g.app_id = int(payload["app_id"])
-            g.user_id = int(payload["sub"]) if payload["sub"].isdigit() else None
-            g.scopes = token_scopes
+                    return format_response(
+                        success=False,
+                        message=f"Insufficient scopes. Required: {', '.join(missing)}",
+                        status_code=403,
+                        error={"code": "INSUFFICIENT_SCOPE", "required": list(missing)},
+                    )
 
-            # Start timing for usage recording
-            g._api_start_time = time.time()
+            g.oauth_app_id = token_data.get("app_id")
+            g.oauth_scopes = token_data.get("scopes", [])
+            g.current_user = {"user_id": token_data.get("user_id"), "store_id": None, "role": None}
 
             return f(*args, **kwargs)
 
-        return decorated_function
+        return decorated
 
     return decorator
 
 
-def require_api_key(f):
-    """
-    Decorator to require a valid Developer API Key.
-    """
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        api_key = request.headers.get("X-API-Key")
-        if not api_key:
-            return jsonify({"error": "unauthorized", "message": "Missing X-API-Key header"}), 401
-
-        # Verify API Key (in a real app, we should hash this)
-        import hashlib
-
-        api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-
-        developer = db.session.query(Developer).filter_by(api_key_hash=api_key_hash).first()
-        if not developer:
-            return jsonify({"error": "unauthorized", "message": "Invalid API Key"}), 401
-
-        g.developer_id = developer.id
-        g.user_id = developer.user_id
-
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
 def record_usage(response):
     """
-    After-request hook to record API usage.
+    after_request hook: record API usage for the current OAuth app.
+    Non-fatal — never raises.
     """
-    if hasattr(g, "app_id") and hasattr(g, "_api_start_time"):
-        latency = (time.time() - g._api_start_time) * 1000  # ms
-        status_code = response.status_code
-        is_error = status_code >= 400
+    try:
+        app_id = getattr(g, "oauth_app_id", None)
+        if not app_id:
+            return response
 
-        # In a real high-scale app, we would buffer these in Redis and sync to DB asynchronously.
-        # For now, we'll increment in Redis and let a background task sync to APIUsageRecord.
-        redis_client = get_redis_client()
-        minute_bucket = datetime.now(timezone.utc).replace(second=0, microsecond=0).isoformat()
+        from datetime import datetime, timezone
 
-        key = f"usage:{g.app_id}:{request.path}:{request.method}:{minute_bucket}"
-        pipe = redis_client.pipeline()
-        pipe.hincrby(key, "request_count", 1)
-        if is_error:
-            pipe.hincrby(key, "error_count", 1)
-        pipe.hincrby(key, "total_latency_ms", int(latency))
-        # bytes_transferred could be estimated from response.data
-        if response.data:
-            pipe.hincrby(key, "bytes_transferred", len(response.data))
+        from app import db
+        from app.models import APIUsageRecord
 
-        pipe.expire(key, 3600 * 2)  # Keep in Redis for 2 hours
-        pipe.execute()
+        now = datetime.now(timezone.utc)
+        bucket = now.replace(second=0, microsecond=0)
+        endpoint = request.endpoint or request.path
+        method = request.method
+        is_error = response.status_code >= 400
+
+        record = (
+            db.session.query(APIUsageRecord)
+            .filter_by(app_id=app_id, endpoint=endpoint, method=method, minute_bucket=bucket)
+            .first()
+        )
+
+        if record:
+            record.request_count += 1
+            if is_error:
+                record.error_count += 1
+        else:
+            record = APIUsageRecord(
+                app_id=app_id,
+                endpoint=endpoint,
+                method=method,
+                minute_bucket=bucket,
+                request_count=1,
+                error_count=1 if is_error else 0,
+            )
+            db.session.add(record)
+
+        db.session.commit()
+    except Exception as exc:
+        logger.debug("Usage recording failed (non-fatal): %s", exc)
 
     return response

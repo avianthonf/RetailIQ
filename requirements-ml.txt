@@ -1,20 +1,14 @@
-prophet==1.1.5
-scikit-learn>=1.5.1
-scipy==1.13.0
-statsmodels==0.14.2
-pandas==2.2.2
-numpy<2.0
-weasyprint>=63.0
-cmdstanpy==1.2.3
-pytesseract==0.3.10
-pillow>=10.4.0
-xgboost==2.0.3
-torch>=2.3.0
-torchvision>=0.18.0
-ultralytics>=8.2.0
-transformers>=4.40.0
-shap==0.44.1
-pymc>=5.16.2
-sentence-transformers==2.5.1
-faiss-cpu==1.8.0
-onnxruntime==1.17.1
+# RetailIQ ML/Analytics Dependencies
+# Install after requirements-core.txt
+
+# ── Data Processing ───────────────────────────────────────────────────────────
+numpy==1.26.4
+pandas==2.2.3
+
+# ── Forecasting ───────────────────────────────────────────────────────────────
+# prophet is large; install only if running forecasting workers
+# prophet==1.1.5
+
+# ── Lightweight stats (always installed) ─────────────────────────────────────
+statsmodels==0.14.4
+scikit-learn==1.5.2

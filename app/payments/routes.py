@@ -13,7 +13,7 @@ from . import payments_bp
 from .engine import get_payment_adapter
 
 
-@payments_bp.route("/payments/providers", methods=["GET"])
+@payments_bp.route("/providers", methods=["GET"])
 @require_auth
 def list_providers():
     country_code = request.args.get("country_code", "IN")
@@ -27,7 +27,7 @@ def list_providers():
     return format_response(True, data=data)
 
 
-@payments_bp.route("/payments/intent", methods=["POST"])
+@payments_bp.route("/intent", methods=["POST"])
 @require_auth
 def create_intent():
     try:

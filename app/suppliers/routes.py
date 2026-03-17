@@ -10,7 +10,7 @@ from app.models import GoodsReceiptNote, Product, PurchaseOrder, PurchaseOrderIt
 from app.suppliers.analytics import compute_avg_lead_time, compute_price_change_pct, compute_supplier_fill_rate
 from app.utils.sanitize import sanitize_string
 
-suppliers_bp = Blueprint("suppliers", __name__)
+from . import po_bp, suppliers_bp
 
 
 def _store_id() -> int:
@@ -24,7 +24,7 @@ def _user_id() -> int:
 # ── 1. SUPPLIER CRUD ──────────────────────────────────────────────────────────
 
 
-@suppliers_bp.route("/suppliers", methods=["GET"])
+@suppliers_bp.route("", methods=["GET"])
 @require_auth
 def list_suppliers():
     """GET /api/v1/suppliers — list all active suppliers for store."""
@@ -63,7 +63,7 @@ def list_suppliers():
     return format_response(data=data)
 
 
-@suppliers_bp.route("/suppliers", methods=["POST"])
+@suppliers_bp.route("", methods=["POST"])
 @require_auth
 def create_supplier():
     sid = _store_id()
@@ -87,7 +87,7 @@ def create_supplier():
     return format_response(data={"id": str(s.id)}, status_code=201)
 
 
-@suppliers_bp.route("/suppliers/<uuid:supplier_id>", methods=["GET"])
+@suppliers_bp.route("/<uuid:supplier_id>", methods=["GET"])
 @require_auth
 def get_supplier(supplier_id):
     sid = _store_id()
@@ -154,7 +154,7 @@ def get_supplier(supplier_id):
     return format_response(data=profile)
 
 
-@suppliers_bp.route("/suppliers/<uuid:supplier_id>", methods=["PUT"])
+@suppliers_bp.route("/<uuid:supplier_id>", methods=["PUT"])
 @require_auth
 def update_supplier(supplier_id):
     sid = _store_id()
@@ -182,7 +182,7 @@ def update_supplier(supplier_id):
     return format_response(data={"id": str(s.id)}, status_code=200)
 
 
-@suppliers_bp.route("/suppliers/<uuid:supplier_id>", methods=["DELETE"])
+@suppliers_bp.route("/<uuid:supplier_id>", methods=["DELETE"])
 @require_auth
 def delete_supplier(supplier_id):
     sid = _store_id()
@@ -195,7 +195,7 @@ def delete_supplier(supplier_id):
     return format_response(data={"id": str(s.id)}, status_code=200)
 
 
-@suppliers_bp.route("/suppliers/<uuid:supplier_id>/products", methods=["POST"])
+@suppliers_bp.route("/<uuid:supplier_id>/products", methods=["POST"])
 @require_auth
 def link_supplier_product(supplier_id):
     sid = _store_id()
@@ -227,7 +227,7 @@ def link_supplier_product(supplier_id):
 # ── 2. PURCHASE ORDERS ────────────────────────────────────────────────────────
 
 
-@suppliers_bp.route("/purchase-orders", methods=["GET"])
+@po_bp.route("", methods=["GET"])
 @require_auth
 def list_purchase_orders():
     sid = _store_id()
@@ -253,7 +253,7 @@ def list_purchase_orders():
     return format_response(data=data)
 
 
-@suppliers_bp.route("/purchase-orders", methods=["POST"])
+@po_bp.route("", methods=["POST"])
 @require_auth
 def create_purchase_order():
     sid = _store_id()
@@ -296,7 +296,7 @@ def create_purchase_order():
     return format_response(data={"id": str(po.id)}, status_code=201)
 
 
-@suppliers_bp.route("/purchase-orders/<uuid:po_id>/send", methods=["PUT", "POST"])
+@po_bp.route("/<uuid:po_id>/send", methods=["PUT", "POST"])
 @require_auth
 def send_purchase_order(po_id):
     sid = _store_id()
@@ -316,7 +316,7 @@ def send_purchase_order(po_id):
     return format_response(data={"id": str(po.id)}, status_code=200)
 
 
-@suppliers_bp.route("/purchase-orders/<uuid:po_id>", methods=["GET"])
+@po_bp.route("/<uuid:po_id>", methods=["GET"])
 @require_auth
 def get_purchase_order(po_id):
     sid = _store_id()
@@ -347,7 +347,7 @@ def get_purchase_order(po_id):
     return format_response(data=data), 200
 
 
-@suppliers_bp.route("/purchase-orders/<uuid:po_id>/receive", methods=["POST"])
+@po_bp.route("/<uuid:po_id>/receive", methods=["POST"])
 @require_auth
 def receive_purchase_order(po_id):
     sid = _store_id()
@@ -409,7 +409,7 @@ def receive_purchase_order(po_id):
     return format_response(data={"id": str(po.id), "status": po.status}, status_code=200)
 
 
-@suppliers_bp.route("/purchase-orders/<uuid:po_id>/cancel", methods=["PUT"])
+@po_bp.route("/<uuid:po_id>/cancel", methods=["PUT"])
 @require_auth
 def cancel_purchase_order(po_id):
     sid = _store_id()

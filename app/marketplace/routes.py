@@ -3,10 +3,10 @@ from typing import List, Optional
 
 from flask import g, jsonify, request
 
-from app import db
-from app.auth.decorators import require_auth
-from app.auth.utils import format_response
-from app.models.marketplace_models import (
+from .. import db
+from ..auth.decorators import require_auth
+from ..auth.utils import format_response
+from ..models.marketplace_models import (
     RFQ,
     CatalogItem,
     MarketplacePOItem,
@@ -16,7 +16,6 @@ from app.models.marketplace_models import (
     SupplierProfile,
     SupplierReview,
 )
-
 from . import marketplace_bp
 from .logistics import get_tracking_events
 from .services import (

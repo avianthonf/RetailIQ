@@ -98,7 +98,7 @@ def calculate_merchant_score(store_id: int) -> int:
 
     profile.credit_score = score
     profile.factors = factors
-    profile.last_recalculated = datetime.now(timezone.utc)
+    profile.last_evaluated_at = datetime.now(timezone.utc)
 
     # Simple risk tiering
     if score >= 750:

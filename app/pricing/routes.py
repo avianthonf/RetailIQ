@@ -72,8 +72,14 @@ def list_suggestions():
             "current_price": float(r.current_price) if r.current_price else None,
             "suggested_price": float(r.suggested_price) if r.suggested_price else None,
             "price_change_pct": float(r.price_change_pct) if r.price_change_pct else None,
+            "suggestion_type": r.reason
+            if r.reason in ["RAISE", "LOWER", "STABLE"]
+            else "RAISE"
+            if (r.suggested_price or 0) > (r.current_price or 0)
+            else "LOWER",
             "reason": r.reason,
             "confidence": r.confidence,
+            "confidence_score": 0.8,
             "status": r.status,
             "created_at": r.created_at.isoformat() if hasattr(r.created_at, "isoformat") else r.created_at,
             "current_margin_pct": round(float(r.current_margin_pct), 2) if r.current_margin_pct else None,

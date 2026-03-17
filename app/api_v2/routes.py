@@ -1,10 +1,9 @@
 from flask import g, jsonify, request
 
-from app import db
-from app.auth.utils import format_response
-from app.developer.gateway import record_usage, require_oauth
-from app.models import Product, Transaction
-
+from .. import db
+from ..auth.utils import format_response
+from ..developer.gateway import record_usage, require_oauth
+from ..models import Product, Transaction
 from . import api_v2_bp
 
 
@@ -19,8 +18,7 @@ def get_inventory():
     """Example V2 API: List products for a merchant's store."""
     store_id = request.args.get("store_id")
     if not store_id:
-        return format_response(False, error={"code": "MISSING_STORE", "message": "store_id is required"}), 400
-
+        return format_response(success=False, error={"code": "MISSING_STORE", "message": "store_id is required"})
     products = db.session.query(Product).filter_by(store_id=store_id).all()
     return format_response(
         True,
@@ -34,7 +32,7 @@ def get_inventory():
             }
             for p in products
         ],
-    ), 200
+    )
 
 
 @api_v2_bp.route("/sales", methods=["GET"])
@@ -43,8 +41,7 @@ def get_sales():
     """Example V2 API: List recent transactions."""
     store_id = request.args.get("store_id")
     if not store_id:
-        return format_response(False, error={"code": "MISSING_STORE", "message": "store_id is required"}), 400
-
+        return format_response(success=False, error={"code": "MISSING_STORE", "message": "store_id is required"})
     transactions = (
         db.session.query(Transaction)
         .filter_by(store_id=store_id)
@@ -58,4 +55,4 @@ def get_sales():
             {"id": t.transaction_id, "total": float(t.total_amount), "created_at": t.created_at.isoformat()}
             for t in transactions
         ],
-    ), 200
+    )

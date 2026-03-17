@@ -6,11 +6,10 @@ from flask import g, jsonify, request
 from marshmallow import ValidationError
 from sqlalchemy import func
 
-from app import db
-from app.auth.decorators import require_auth
-from app.auth.utils import format_response
-from app.chain.schemas import AddStoreToGroupSchema, ConfirmTransferSchema, CreateStoreGroupSchema
-from app.models import (
+from .. import db
+from ..auth.decorators import require_auth
+from ..auth.utils import format_response
+from ..models import (
     Alert,
     ChainDailyAggregate,
     DailyStoreSummary,
@@ -19,15 +18,17 @@ from app.models import (
     StoreGroup,
     StoreGroupMembership,
 )
-
 from . import chain_bp
+from .schemas import AddStoreToGroupSchema, ConfirmTransferSchema, CreateStoreGroupSchema
 
 
 def require_chain_owner(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if g.current_user.get("chain_role") != "CHAIN_OWNER":
-            return format_response(False, error={"code": "FORBIDDEN", "message": "Requires CHAIN_OWNER role"}), 403
+            return format_response(
+                success=False, error={"code": "FORBIDDEN", "message": "Requires CHAIN_OWNER role"}, status_code=403
+            )
         return f(*args, **kwargs)
 
     return decorated
@@ -39,20 +40,20 @@ def create_group():
     try:
         data = CreateStoreGroupSchema().load(request.json)
     except Exception as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": str(err)}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": str(err)})
 
     user_id = g.current_user["user_id"]
 
     # Check if user already owns a group
     existing = db.session.query(StoreGroup).filter_by(owner_user_id=user_id).first()
     if existing:
-        return format_response(False, error={"code": "CONFLICT", "message": "User already owns a store group"}), 409
+        return format_response(success=False, error={"code": "CONFLICT", "message": "User already owns a store group"})
 
     group = StoreGroup(name=data["name"], owner_user_id=user_id)
     db.session.add(group)
     db.session.commit()
 
-    return format_response(True, data={"group_id": str(group.id), "name": group.name}), 201
+    return format_response(success=True, data={"group_id": str(group.id), "name": group.name})
 
 
 @chain_bp.route("/groups/<uuid:group_id>/stores", methods=["POST"])
@@ -60,12 +61,12 @@ def create_group():
 @require_chain_owner
 def add_store_to_group(group_id):
     if g.current_user.get("chain_group_id") != str(group_id):
-        return format_response(False, error={"code": "FORBIDDEN", "message": "Not owner of this group"}), 403
+        return format_response(success=False, error={"code": "FORBIDDEN", "message": "Not owner of this group"})
 
     try:
         data = AddStoreToGroupSchema().load(request.json)
     except Exception as err:
-        return format_response(False, error={"code": "VALIDATION_ERROR", "message": str(err)}), 400
+        return format_response(success=False, error={"code": "VALIDATION_ERROR", "message": str(err)})
 
     store_id = data["store_id"]
     manager_id = data.get("manager_user_id")
@@ -73,18 +74,18 @@ def add_store_to_group(group_id):
     # Check store exists
     store = db.session.query(Store).filter_by(store_id=store_id).first()
     if not store:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Store not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Store not found"})
 
     # Check not already in a group
     existing_membership = db.session.query(StoreGroupMembership).filter_by(store_id=store_id).first()
     if existing_membership:
-        return format_response(False, error={"code": "CONFLICT", "message": "Store is already in a group"}), 409
+        return format_response(success=False, error={"code": "CONFLICT", "message": "Store is already in a group"})
 
     membership = StoreGroupMembership(group_id=group_id, store_id=store_id, manager_user_id=manager_id)
     db.session.add(membership)
     db.session.commit()
 
-    return format_response(True, data={"membership_id": str(membership.id)}), 201
+    return format_response(success=True, data={"membership_id": str(membership.id)}, status_code=201)
 
 
 @chain_bp.route("/dashboard", methods=["GET"])
@@ -123,7 +124,7 @@ def chain_dashboard():
     for store_id in store_ids:
         store = db.session.query(Store).filter_by(store_id=store_id).first()
         agg = next((a for a in aggs if a.store_id == store_id), None)
-        alert_count = db.session.query(Alert).filter_by(store_id=store_id, resolved_at=None).count()
+        alert_count = db.session.query(Alert).filter(Alert.store_id == store_id, Alert.resolved_at.is_(None)).count()
 
         per_store.append(
             {
@@ -184,7 +185,7 @@ def evaluate_chain_comparison():
     store_ids = [m.store_id for m in memberships]
 
     if not store_ids:
-        return format_response(True, data=[])
+        return format_response(success=True, data=[])
 
     # Aggregate over the period
     results = (
@@ -227,7 +228,7 @@ def evaluate_chain_comparison():
             }
         )
 
-    return format_response(True, data=comparison)
+    return format_response(success=True, data=comparison)
 
 
 @chain_bp.route("/transfers", methods=["GET"])
@@ -249,7 +250,7 @@ def get_transfers():
         for s in suggestions
     ]
 
-    return format_response(True, data=transfers)
+    return format_response(success=True, data=transfers)
 
 
 @chain_bp.route("/transfers/<uuid:transfer_id>/confirm", methods=["POST"])
@@ -260,9 +261,9 @@ def confirm_transfer(transfer_id):
 
     suggestion = db.session.query(InterStoreTransferSuggestion).filter_by(id=transfer_id, group_id=group_id).first()
     if not suggestion:
-        return format_response(False, error={"code": "NOT_FOUND", "message": "Transfer suggestion not found"}), 404
+        return format_response(success=False, error={"code": "NOT_FOUND", "message": "Transfer suggestion not found"})
 
     suggestion.status = "ACTIONED"
     db.session.commit()
 
-    return format_response(True, data={"message": "Transfer confirmed", "id": str(suggestion.id)})
+    return format_response(success=True, data={"message": "Transfer confirmed", "id": str(suggestion.id)})
