@@ -75,6 +75,7 @@ jobs:
       - name: Bandit SAST scan
         run: |
           source .venv/bin/activate
+          # Use isolated venv to avoid scanning exceptions for global packages
           bandit -r app/ \
             -s B101,B601 \
             -f json -o bandit-report.json \
