@@ -36,10 +36,10 @@ def _send_raw(to_email, subject, html_body):
     """
     username, password = _get_mail_config()
 
-    if not username:
-        # Dev fallback
-        logger.info("[DEV-EMAIL] To: %s | Subject: %s", to_email, subject)
-        logger.info("[DEV-EMAIL] Body:\n%s", html_body)
+    if not username or not current_app.config.get("EMAIL_ENABLED"):
+        # Dev fallback or disabled
+        logger.info("[DEV/DISABLED-EMAIL] To: %s | Subject: %s", to_email, subject)
+        logger.info("[DEV/DISABLED-EMAIL] Body:\n%s", html_body)
         return True
 
     msg = MIMEMultipart("alternative")
