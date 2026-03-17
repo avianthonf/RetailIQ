@@ -1,63 +1,101 @@
+# RetailIQ Ignore Rules - Railway Protocol v1.0
+
+# Environments
+.env
+.venv/
+venv/
+env/
+*.env
+*.bak
+*.swp
+
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.sqlite3
-
-# Virtual environments
-venv/
-.venv/
-env/
-
-# Local AWS configurations
-aws/task-definitions/*.local.json
-
-# Environment files
-.env
-
-# Pytest
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
-
-# Logs & debug artifacts
-*.log
-logs/
-celerybeat-schedule
-celerybeat-schedule.db
-
-# Local test output (never commit)
-*_out.txt
-*_out*.txt
-*_logs*.txt
-pytest_*.txt
-docker_*_out*.txt
-test_step*.txt
-test_results*.txt
-test_out*.txt
-psql*.txt
-prophet_test*.txt
-*_failures.txt
-*_debug.txt
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-
-# Coverage
 .coverage
 htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.cache
+.mypy_cache/
+.ruff_cache/
+coverage.json
+safety.json
 
-# Docker overrides
-docker-compose.override.yml
+# Build & Eggs
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+dist/
+build/
 
-# Runtime user-uploaded files (OCR invoices, etc.) — never commit
-uploads/
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
 
-# Scratch / debug files
-*.patch
-diff.patch
-status.txt
+# Temporary Databases & Cache
+*.db
+!app/models/*.db
+celerybeat-schedule
+*.lock
+mobile/.gradle/
+mobile/build/
+mobile/*/build/
+
+# Project Specific Reports & Trash
+collected.txt
+cov_report*.txt
+coverage_report.txt
+coverage_summary.txt
+failing_tests.txt
+out.txt
+jsonify_refs.txt
+openapi_*.json
+!app/static/openapi.json
+migration_tmp.db
+check_missing_models.db
+test_check.db
+yolov8n.pt
+*.jpg
+!app/forecasting/*.jpg
+!app/vision/*.jpg
+!shelf.jpg
+module_audit.log
+pytest_*.log
+pytest_*.txt
+ruff_*.txt
+test_*.txt
+test_log.txt
+tmp_*.py
+*.log.txt
+reports/
+drift_trace_*.txt
+unique_failed_tests.txt
+repro_app.py
+parse_coverage.py
+node_modules/
+dist/
+.npm/
+.yarn/
+module_audit.log
+pytest_*.log
+pytest_*.txt
+ruff_*.txt
+test_*.txt
+test_*.log
+tmp_*.py
+*.log.txt
+reports/
+drift_trace_*.txt
+unique_failed_tests.txt
+repro_app.py
+parse_coverage.py
