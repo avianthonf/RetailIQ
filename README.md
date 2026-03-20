@@ -1,127 +1,227 @@
 # RetailIQ: Integrated Retail & Embedded Finance Platform
 
-> [!CAUTION]
-> **SOURCE-INSPECTED IMPLEMENTATION AUDIT (v1.0 - 2026-03-20)**
->
-> | Module | Status | System Stability | Functional Completeness | Critical Path Gaps |
-> | :--- | :--- | :--- | :--- | :--- |
-> | **Auth & Identity** | 🟡 PARTIAL | 80% | 80% | OAuth/refresh flows exist, but verification and email-delivery paths still depend on runtime config |
-> | **POS & Transactions** | 🟢 IMPLEMENTED | 90% | 90% | Core sales, returns, GST, and loyalty flows are present and test-covered |
-> | **Inventory & Stock** | 🟢 IMPLEMENTED | 90% | 90% | SKU generation, alerts, price history, and slow-mover logic are present |
-> | **Embedded Finance** | 🟡 PARTIAL | 75% | 70% | KYC, loan, insurance, ledger, and repayment paths exist, but automation is not fully end-to-end |
-> | **AI Vision** | 🟡 PARTIAL | 65% | 55% | Receipt OCR is test-covered; shelf analysis remains a future enhancement |
-> | **AI NLP Assistant** | 🟢 IMPLEMENTED | 80% | 80% | Deterministic assistant/recommender now answer from store data; RAG remains a future enhancement |
-> | **Forecasting** | � IMPLEMENTED | 80% | 80% | Regime detection plus deterministic fallback forecasting is in place and test-covered |
-> | **Pricing Engine** | 🟢 IMPLEMENTED | 60% | 60% | Heuristic price recommendations exist; this is not an empty placeholder |
-> | **Background Tasks** | � IMPLEMENTED | 85% | 85% | OCR processing, slow-mover detection, inventory sync, and weekly pricing analysis are real |
-> | **Compliance (GST)** | 🟢 IMPLEMENTED | 90% | 90% | Local GST logic exists; e-invoicing adapters are present with deterministic outputs |
->
-> **REMAINING DEBT**: Only lower-priority adapter backends and shelf-analysis expansion remain. The core retail, finance, AI, vision, marketplace, and task flows are implemented. **Test pass rate** is source-verified by the local suite.
+RetailIQ is a Flask-based retail operating system that combines point-of-sale, inventory, analytics, forecasting, loyalty, supplier procurement, developer APIs, WhatsApp messaging, market intelligence, GST/compliance, and embedded-finance workflows behind one backend.
 
-RetailIQ is a comprehensive, production-hardened retail operating system designed for high-volume enterprise reliability. It integrates point-of-sale, inventory management, embedded finance, and AI-driven market intelligence into a single, unified platform.
+This README is a code-verified architecture and engineering guide for the current repository state. It is aligned to:
 
-> [!IMPORTANT]
-> This documentation is the primary source of truth for the RetailIQ project structure and implementation. Every file documented here is essential to the system's stability.
+- `app/__init__.py`
+- `app/factory.py`
+- `config.py`
+- the mounted route blueprints
+- the SQLAlchemy model layer in `app/models/*.py`
+- the API and service behavior asserted by the `tests/` suite
+
+For the reusable Oracle Document generator prompt, see `oracle.md`.
 
 ## 🏗 System Architecture (Core Engine v1.0)
 
-RetailIQ is a **resilient, distributed retail operating system** designed for high-availability. It uses a **multi-process topology** to separate API requests, background task processing, and scheduling.
+RetailIQ uses a Flask application factory with SQLAlchemy, Redis-backed limiter/session infrastructure, and Celery for async and scheduled work.
 
-### 1. Topology & Components
-- **API Gateway (Gunicorn)**: Multi-threaded WSGI server (Gthread) handling REST requests.
-- **Task Worker (Celery)**: Background processor for heavy ML (Prophet), OCR, and webhooks.
-- **Task Broker (Redis)**: Message queue and rate-limiting storage.
-- **Persistence (PostgreSQL)**: Relational storage with strict foreign keys and `Decimal` precision.
-- **Schedule (Celery Beat)**: Periodic job scheduler for daily aggregates and alerts.
+## Runtime Topology
 
-### 2. Implementation Logic
-```mermaid
-graph TD
-    subgraph Container [Railway Combined Mode]
-        G[Gunicorn API]
-        CW[Celery Worker]
-        CB[Celery Beat]
-    end
+- **API process**: Flask app served through WSGI/Gunicorn-compatible entrypoints
+- **Database**: PostgreSQL in normal runtime, SQLite in-memory during tests
+- **Redis**: rate limiting, token/session state, broker/backend support
+- **Worker**: Celery task execution for snapshots, OCR, alerts, webhook delivery, and batch analytics jobs
+- **Scheduler**: Celery Beat or equivalent scheduler for periodic background jobs
 
-    subgraph Data [Cloud Services]
-        DB[(Postgres)]
-        RD[(Redis)]
-    end
-
-    G --> DB
-    G --> RD
-    CW --> DB
-    CW --> RD
-```
-
-### 3. Resilience Patterns
-- **Lazy Module Initialization**: Heavy libraries like `numpy` and `prophet` are imported only inside the specific functions that require them. This allows the API to start in under 2 seconds, satisfying Railway's health checks even while large models are loading in the background.
-- **Automated URI Normalization**: The application factory handles legacy database prefixes (e.g., `postgres://` to `postgresql://`) automatically.
-
----
-
-
-The system follows a high-resilience, event-driven architecture designed for enterprise-grade reliability.
+## High-Level Request and Worker Flow
 
 ```mermaid
 graph TD
-    subgraph ClientLayer [Client & POS Layer]
-        POS["Flutter POS / Web Frontend"]
-        DEV["Developer Third-Party Apps"]
+    subgraph Clients
+        POS[POS / Web / Mobile]
+        DEV[Developer Apps]
     end
 
-    subgraph API_Gateway [API & Security Layer]
-        Auth["Auth Service (JWT/OAuth)"]
-        Limiter["Rate Limiter (Redis)"]
-        Routes["API Blueprint Router"]
+    subgraph API
+        APP[Flask App Factory]
+        AUTH[JWT or OAuth Auth]
+        ROUTES[Blueprint Routes]
+        SERVICES[Domain Services]
     end
 
-    subgraph ServiceLayer [Business & Logic Layer]
-        Sales["Sales / Transaction Service"]
-        Finance["Finance / Credit Engine"]
-        Intelligence["AI / Forecast Ensemble"]
+    subgraph Persistence
+        DB[(PostgreSQL)]
+        REDIS[(Redis)]
     end
 
-    subgraph DataLayer [Storage & Persistence]
-        DB[(PostgreSQL / SQLAlchemy)]
-        Cache[(Redis Cache / FIFO)]
+    subgraph Async
+        CELERY[Celery Worker]
+        BEAT[Celery Beat]
     end
 
-    POS --> Auth
-    DEV --> Auth
-    Auth --> Limiter
-    Limiter --> Routes
-    Routes --> ServiceLayer
-    ServiceLayer --> DataLayer
-    ServiceLayer --> Webhooks["Webhook Broadcast (Celery)"]
+    POS --> APP
+    DEV --> APP
+    APP --> AUTH
+    AUTH --> ROUTES
+    ROUTES --> SERVICES
+    SERVICES --> DB
+    SERVICES --> REDIS
+    SERVICES --> CELERY
+    BEAT --> CELERY
+    CELERY --> DB
+    CELERY --> REDIS
 ```
 
-- **Frontend**: Flutter/Web-based POS enforcing `Offline Safety Mode` and secure state management.
-- **Backend**: Flask-based RESTful API using `Decimal` across all financial endpoints to prevent floating-point errors.
-- **Sync Engine**: FIFO serial streams with built-in `CALC_DRIFT` tolerance (0.05 INR).
-- **Asynchronous Layer**: Celery + Redis for OCR, high-latency market analysis, and reliable webhook delivery.
+## Application Bootstrap
+
+`create_app()` in `app/factory.py` is the authoritative startup path.
+
+- Loads config from `config.get_config()` or injected config
+- Sets JWT defaults when absent
+- Forces `sqlite:///:memory:` during tests
+- Resolves `SQLALCHEMY_DATABASE_URI` from config or `DATABASE_URL`
+- Normalizes `postgres://` to `postgresql://`
+- Initializes `db` and `limiter`
+- Resolves limiter storage from `RATELIMIT_STORAGE_URL`, `REDIS_URL`, or `CELERY_BROKER_URL`
+- Enables CORS for `/api/*`
+- Runs production readiness checks in production
+- Registers all blueprints and JSON error handlers
+- Exposes `GET /health` and `GET /`
+
+## Mounted API Namespaces
+
+The application registers the following major namespaces:
+
+- `/api/v1/auth`
+- `/api/v1/analytics`
+- `/api/v1/barcodes`
+- `/api/v1/chain`
+- `/api/v1/customers`
+- `/api/v1/dashboard`
+- `/api/v1/decisions`
+- `/api/v1/developer`
+- `/api/v1/events`
+- `/api/v1/forecasting`
+- `/api/v1/gst`
+- `/api/v1/i18n`
+- `/api/v1/inventory`
+- `/api/v1/kyc`
+- `/api/v1/loyalty`
+- `/api/v1/credit`
+- `/api/v1/market`
+- `/api/v1/marketplace`
+- `/api/v1/nlp`
+- `/api/v1/offline`
+- `/api/v1/ops`
+- `/api/v1/payments`
+- `/api/v1/purchase-orders`
+- `/api/v1/pricing`
+- `/api/v1/receipts`
+- `/api/v1/staff`
+- `/api/v1/store`
+- `/api/v1/suppliers`
+- `/api/v1/tax`
+- `/api/v1/team`
+- `/api/v1/transactions`
+- `/api/v1/vision`
+- `/api/v1/whatsapp`
+- `/api/v2`
+- `/api/v2/ai`
+- `/api/v2/einvoice`
+- `/api/v2/finance`
+- `/oauth`
 
 ---
 
 ## 🔐 Authentication & Security Architecture
 
-RetailIQ employs a dual-token security model to balance user convenience with developer ecosystem security.
+RetailIQ uses two main auth patterns.
 
-1.  **Identity Layer (JWT)**: Users (Merchants/Staff) authenticate via `mobile_number` and `OTP`/`MFA`. The system issues a JWT (HS256) containing `user_id`, `store_id`, and `role`. This token is required for all `/api/v1` operations.
-2.  **Delegation Layer (OAuth 2.0)**: Developers create applications that interact with the v2 API. The system implements a full `client_credentials` and `authorization_code` flow, issuing random-string Bearer tokens stored in Redis for maximum revoked-token performance.
+- **JWT merchant/staff auth** for `/api/v1/*`
+- **OAuth-style bearer tokens** for developer integrations and selected `/api/v2/*` endpoints
+
+## JWT Flows
+
+- Registration issues OTP workflow
+- OTP verification returns auto-login tokens
+- Login returns access and refresh tokens
+- Refresh rotates refresh tokens
+- Logout revokes refresh tokens
+
+The JWT context is used for:
+
+- `user_id`
+- `store_id`
+- `role`
+
+Some chain flows also rely on additional chain context in the token.
+
+## Authorization Model
+
+- `owner` has access to configuration, analytics, returns, pricing actions, and management endpoints
+- `staff` can create transactions and manage staff sessions but is restricted from owner-only operations
+
+## Security and Infra Controls
+
+- Flask-Limiter is wired globally with Redis or in-memory fallback
+- CORS is configurable via `CORS_ORIGINS`
+- WhatsApp access tokens are encrypted at rest
+- Production startup performs readiness validation
+- Standard JSON error handlers are registered for `400`, `401`, `403`, `404`, `405`, `422`, `429`, and `500`
 
 ---
 
 ## ⚙️ Core Engineering Design Patterns
 
-### The Service Layer Pattern
-We enforce a strict "Service-Controller" separation. Route handlers in `routes.py` are thin; all business logic, invariant enforcement, and cross-model operations reside in `services.py`. 
-- **Atomic Transactions**: All business operations are wrapped in a single database transaction to ensure system-wide consistency.
+## Core Domain Patterns
 
-### High-Precision Data Integrity & Compatibility
-- **Decimal Precision**: Money is NEVER stored as a float. The system uses `Numeric(10, 2)` for database storage and Python's `Decimal` for all computations.
-- **Audit Trails**: Critical models inherit from `AuditMixin`, ensuring every mutation is tracked with a timestamp and user identifier.
-- **Dependency Compatibility**: Implements a global `numpy_patch.py` to ensure legacy ML libraries (like Prophet/Torch) remain compatible with modern environments (NumPy 2.0+).
+### Store-scoped tenancy
+
+Most operational entities are scoped to `store_id`. This is the main multi-tenant boundary across users, customers, products, transactions, suppliers, loyalty accounts, GST config, and analytics summaries.
+
+### Thin routes, service-heavy mutations
+
+Many modules keep request parsing in routes and push mutation logic into service/engine code.
+
+Key examples:
+
+- transaction processing in `app/transactions/services.py`
+- pricing generation in `app/pricing/engine.py`
+- forecasting in `app/forecasting/engine.py`
+- finance lifecycle logic in `app/finance/*`
+- market intelligence logic in `app/market_intelligence/engine.py`
+
+### Atomic side-effect orchestration
+
+The transaction service is the most important example of coordinated side effects:
+
+- sales rows are written
+- stock is decremented
+- loyalty points may accrue
+- credit ledger may change
+- GST rows may be generated
+- staff session attribution may be applied
+- analytics rebuild and webhook side effects may be queued
+
+### Read-model driven analytics
+
+Analytics and forecasting APIs rely heavily on aggregate/cache tables rather than re-scanning raw transactional data on each request.
+
+Important tables include:
+
+- `DailyStoreSummary`
+- `DailyCategorySummary`
+- `DailySkuSummary`
+- `ForecastCache`
+- `AnalyticsSnapshot`
+
+### Async-first for heavy work
+
+Celery is used for:
+
+- OCR processing
+- analytics snapshot building
+- webhook delivery
+- periodic alert generation
+- batch forecast/materialization workflows
+
+### Compatibility and testability
+
+- test suite adapts Postgres-only types for SQLite
+- tests use `StaticPool` so Flask handlers and fixtures share one in-memory database
+- `numpy_patch.py` exists for numeric-library compatibility in the test/runtime environment
 
 ---
 
@@ -130,169 +230,255 @@ We enforce a strict "Service-Controller" separation. Route handlers in `routes.p
 ### 📦 `app/` (Core Application)
 
 #### `__init__.py`
-Application factory. Initializes Flask, SQLAlchemy, Limiter, and registers 30+ blueprints including v1 and v2 API namespaces.
+Defines extension singletons, blueprint registration, and JSON error handlers. Re-exports `create_app` from `app/factory.py`.
 
 #### `auth/` (Identity & Permissions)
-- `__init__.py`: Blueprint definition for Authentication.
-- `decorators.py`: `@require_auth` and `@require_role` logic for RBAC enforcement.
-- `oauth.py`: OAuth 2.0 Authorization Server implementation (Token generation, verification, and Redis-backed session management).
-- `oauth_routes.py`: Authorization and Token exchange endpoints.
-- `routes.py`: Standard login/registration and MFA (OTP) logic.
-- `utils.py`: JWT signing, hashing, and token invalidation helpers.
+- `decorators.py`: auth and role guards
+- `oauth.py` and `oauth_routes.py`: OAuth token and authorization flows
+- `routes.py`: registration, OTP, login, refresh, logout
+- `utils.py`: JWT generation, hashing, Redis token helpers
 
 #### `finance/` (Embedded Finance Layer)
-- `credit_scoring.py`: Proprietary algorithm for calculating `MerchantCreditProfile` based on transaction history and Pareto analytics.
-- `insurance_engine.py`: Logic for `InsurancePolicy` issuance, premium calculation, and automated claims processing.
-- `ledger.py`: The single source of truth for financial movements, enforcing invariants across `OPERATING`, `RESERVE`, and `REVENUE` accounts.
-- `loan_engine.py`: Manages the lifecycle of `LoanApplication`, from automated approval to disbursement and repayment recording.
-- `payment_processor.py`: Low-level integration for handling `PaymentTransaction` states (PENDING -> SETTLED).
-- `treasury_manager.py`: Automated fund allocation and reserve management logic.
-- `routes.py`: Financial API endpoints for loans, insurance, and ledger audits.
+- `credit_scoring.py`: merchant score computation
+- `ledger.py`: double-entry financial movements
+- `loan_engine.py`: approval and disbursement behavior
+- `insurance_engine.py`: policy enrollment and claims
+- `treasury_manager.py`: sweep logic and treasury balance movement
+- `routes.py`: `/api/v2/finance/*` endpoints
 
 #### `models/` (Data Architecture)
-- `__init__.py`: The master schema file containing 50+ SQLAlchemy models. Defines core entities like `User`, `Store`, `Product`, `Transaction`, and `AuditLog`.
-- `finance_models.py`: Specialized models for the embedded finance platform including `LoanApplication`, `InsurancePolicy`, and `MerchantCreditProfile`.
+- `__init__.py`: core operational models and imports of extension model modules
+- `expansion_models.py`: country, payment, KYC, translation, and e-invoice models
+- `finance_models.py`: lending, accounts, treasury, insurance, merchant KYC
+- `marketplace_models.py`: catalog, RFQ, B2B orders, supplier reviews
+- `missing_models.py`: developer platform and market-intelligence support models
 
 #### `forecasting/` (AI Demand Sensing)
-- `engine.py`: High-level interface for retrieving pre-computed demand forecasts from `ForecastCache`.
-- `ensemble.py`: The core ML engine. Uses an ensemble of **Prophet, XGBoost, and LSTM** models to predict SKU-level demand.
+- `engine.py`: forecasting model selection, regime detection, forecast result construction
+- demand sensing paths integrate with events and `DemandSensingLog`
 
 #### `vision/` (OCR & Shelf Analytics)
-- `parser.py`: Regex and heuristic-based parser for extracting line items from raw OCR text.
-- `routes.py`: API endpoints for uploading invoices (`upload_invoice`) and confirming inventory intake.
-- `shelf.py`: **[STUB]** Placeholder for YOLOv8 shelf compliance and gap detection.
-- `receipt.py`: Logic for digitizing consumer receipts into structured `Transaction` data.
+- `parser.py`: OCR text parsing into structured invoice items
+- `routes.py`: OCR upload, status, confirm, dismiss, shelf-scan, receipt digitization endpoints
 
 #### `transactions/` (POS Core)
-- `services.py`: The "Sales Service". Handles atomic transaction processing, stock updates, GST calculation, and loyalty point issuance in a single DB transaction.
-- `routes.py`: Standardized API endpoints registered under `/api/v1/transactions`.
+- `services.py`: transaction orchestration, returns, stock updates, loyalty/credit/GST hooks
+- `routes.py`: create, batch, list, detail, return, daily summary
 
 #### `inventory/` (Stock & Catalog)
-- `routes.py`: Product and category management, integrated with auto-SKU generation.
-- `services.py`: Lifecycle management for products, including price history tracking.
+- `routes.py`: product list/create/update/delete, stock updates, audits, alerts, price history
+- `schemas.py`: product and stock audit validation
 
 #### `receipts/` (Barcodes & Printing)
-- `routes.py`: Barcode lookup and receipt template management.
+- barcode lookup, barcode registration, template upsert, print job creation
 
 #### `gst/` (Tax & Compliance)
-- `routes.py`: Endpoints for GST invoice generation and filing.
-- `utils.py`: Validation logic for GSTIN formats and checksums.
-- `schemas.py`: Validation schemas for tax reports.
+- GSTIN validation, HSN lookup, liability slabs, filing-period support
 
 #### `nlp/` (Natural Language Assistant)
-- `router.py`: Keyword-based intent router for the retail assistant.
-- `templates.py`: Deterministic response templates to ensure 100% factual accuracy in assistant replies.
-- `assistant.py`: **[STUB]** Placeholder for RAG-based LLaMA 7B integration.
+- intent resolution, query handling, and AI helper endpoints for NLP/recommendation flows
 
 #### `market_intelligence/` (External Signals)
-- `engine.py`: Aggregates "Signals" (Price, Weather, Commodity indices) into actionable merchant alerts.
-- `tasks.py`: Scheduled Celery tasks for ingesting data from external connectors.
-- `websocket.py`: Real-time broadcast of market anomalies to connected store dashboards.
+- market signals, price indices, alerts, intelligence reports, and market-aware pricing context
 
 #### `tasks/` (Background Workers)
-- `db_session.py`: Context manager for scoped Celery database sessions.
-- `tasks.py`: Core background jobs (Alert evaluation, Daily aggregate rebuilding).
-- `webhook_tasks.py`: Reliable webhook delivery engine with exponential backoff and "Dead Letter" logic.
+- periodic jobs for snapshots, alerts, forecasts, GST compilation, OCR, and operational maintenance
 
 #### `utils/` (Infrastructure Helpers)
-- `audit.py`: Middleware for transparent system-wide audit logging.
-- `security.py`: Hardening helpers (XSS protection, CSP headers, sensitive field masking).
-- `webhooks.py`: Logic for queuing and broadcasting events to developer applications.
+- reusable infrastructure helpers including security and webhook delivery support
+
+## Other Important Top-Level Files
+
+- `config.py`: environment-specific config classes and defaults
+- `celery_worker.py`: Celery app bootstrap
+- `wsgi.py`: WSGI entrypoint
+- `alembic.ini` and `migrations/`: schema migration system
+- `docker-compose.yml`: local dependency orchestration
+- `requirements.txt`: Python dependency set
+- `ruff.toml`: linting rules
+- `tests/`: integration and unit tests covering auth, inventory, analytics, finance, expansion, vision, NLP, suppliers, transactions, WhatsApp, forecasting, and more
 
 ---
 
 ## 🛠 Developer & Engineer Guide
 
-### 1. Local Development
-#### Prerequisites
-- Python 3.10+
-- PostgreSQL 14+
-- Redis (Local or Docker)
+## Prerequisites
 
-#### Setup
-1. `pip install -r requirements.txt`
-2. Create `.env` from `.env.example`
-3. `flask db upgrade`
-4. `python run.py` (API) / `celery -A celery_worker.celery_app worker` (Worker)
+- Python `3.10+`
+- PostgreSQL `14+` for normal local runtime
+- Redis for limiter, auth token state, and Celery
 
-### 2. Docker Setup
+## Environment Variables
+
+The main runtime variables are:
+
+- `SECRET_KEY`
+- `FLASK_ENV`
+- `ENVIRONMENT`
+- `APP_VERSION`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `CELERY_BROKER_URL`
+- `JWT_SECRET_KEY`
+- `JWT_ACCESS_EXPIRES_HOURS`
+- `JWT_REFRESH_EXPIRES_DAYS`
+- `EMAIL_ENABLED`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM`
+- `CORS_ORIGINS`
+- `RATELIMIT_ENABLED`
+- `RATELIMIT_DEFAULT`
+- `FRONTEND_URL`
+
+Start from `.env.example` and copy the values you need into a local `.env`.
+
+## Local Development Setup
+
 ```bash
-docker compose build --no-cache
+pip install -r requirements.txt
+copy .env.example .env
+flask db upgrade
+python -c "from app import create_app; app=create_app(); print(app.url_map)"
+```
+
+Typical API startup options:
+
+```bash
+python wsgi.py
+```
+
+or your preferred Flask/Gunicorn command wired to `create_app()`.
+
+Typical worker startup:
+
+```bash
+celery -A celery_worker.celery_app worker --loglevel=info
+celery -A celery_worker.celery_app beat --loglevel=info
+```
+
+## Docker and Compose
+
+Local container orchestration is available through the Dockerfiles and compose files in the repo root.
+
+Typical flow:
+
+```bash
+docker compose build
 docker compose up -d
 ```
 
-### 3. Railway Cloud Deployment
-The system is pre-configured for Railway using `Dockerfile.railway` and `railway.toml`.
+## Testing Guide
 
-#### **Crucial: Updating Resources**
-If you create new Database or Redis instances in Railway, you **must** update the following environment variables in the **App Service** dashboard:
-1. `DATABASE_URL`: Set to `${{Postgres.DATABASE_URL}}` (or similar depending on service name).
-2. `REDIS_URL`: Set to `${{Redis.REDIS_URL}}`. **Do not use `${{Redis.DATABASE_URL}}` for Redis.**
-3. `CELERY_BROKER_URL`: Set to `${{REDIS_URL}}/1`. Ensure the prefix is not empty.
+### Important test harness behavior
 
-> [!WARNING]
-> If a variable resolves to just `/1` (e.g. if the prefix variable is empty), Celery will fail with `ModuleNotFoundError: No module named '/1'`. Always verify the base URL is populated.
+- Tests use in-memory SQLite with `StaticPool`
+- Postgres-specific types are shimmed for SQLite in `tests/conftest.py`
+- Rate limiting is disabled in tests
+- JWT keys are generated dynamically for the test session
+- Tables are cleaned between tests for isolation
 
-#### **Health Checks**
-The `Dockerfile.railway` includes a health check hitting `/health`. If the app crashes, check the logs for `ModuleNotFoundError` or `OOM` (Out of Memory). Currently optimized to run on 512MB RAM.
+### Recommended commands
 
----
+Targeted regression commands:
 
-
-### Prerequisites
-- Python 3.10+
-- PostgreSQL 14+
-- Redis (for Limiter and Celery)
-
-### Local Setup
-1. `pip install -r requirements.txt`
-2. Configure `.env` with `DATABASE_URL` and `REDIS_URL`.
-3. `flask db upgrade` (Verified 100% drift-free)
-4. `flask run` (or `python run.py`)
-
-### 🏗 Extended Architecture & Factory Patterns
-RetailIQ uses an **Isolated Factory Pattern** to ensure configuration integrity across development and production environments.
-- **`app/factory.py`**: The definitive source for application creation. It implements strict security checks for production environments, ensuring that default credentials or weak keys never reach a live state.
-- **Environment Scoping**: The factory dynamically adjusts extensions (Redis, SQLAlchemy) based on the `ENVIRONMENT` variable, ensuring test isolation via `sqlite:///:memory:` by default if nothing else is specified.
-
-### 🧪 Quality Engineering & Testing Policy
-We enforce a **Strict Reliability Policy**.
-- **Full Suite**: `pytest -v --tb=short -p no:cacheprovider`
-- **Isolation**: All tests use `StaticPool` for SQLite to maintain thread safety during in-memory testing.
-- **Coverage**: Every remediation chunk is verified against 400+ unit and integration tests.
-
-### Testing Protocol
-We enforce a "100% Pass Rate Policy" for all code changes.
 ```bash
-# Run all core tests
 pytest tests/test_auth_flow.py tests/test_inventory.py tests/test_transactions.py tests/test_receipts.py
+pytest tests/test_analytics.py tests/test_pricing.py tests/test_store.py tests/test_suppliers.py
+pytest tests/test_loyalty.py tests/test_finance.py tests/test_forecasting.py tests/test_gst.py
+pytest tests/test_marketplace.py tests/test_market_intelligence.py tests/test_vision.py tests/test_whatsapp.py
 ```
 
-### Global Integrity Policy
-All developers MUST adhere to the [System-Integrity-Policy.md](file:///d:/Files/Desktop/RetailIQ-Final-Workspace/RetailIQ/frontend-specs/System-Integrity-Policy.md):
-1. **Financial Precision**: Use `HALF_UP` rounding. NEVER use native floats for money.
-2. **SKU Standards**: Auto-generated SKUs follow `SKU-{store_id:04d}-{count:06d}` formatting.
-3. **Offline Safety**: Ensure `is_manual_review` flags are respected during sync.
-4. **Receipt IDs**: Mandate unique device prefixes for all hardware integrations.
+Full suite:
+
+```bash
+pytest -v --tb=short -p no:cacheprovider
+```
+
+## Engineering Rules and Invariants
+
+### Data and money handling
+
+- Treat store scope as the primary tenancy boundary
+- Avoid client-side authoritative recomputation of totals where server-computed values exist
+- Keep transaction side effects atomic
+- Preserve ledger consistency for finance flows
+
+### API consumption guidance
+
+- Do not assume a single response envelope shape across all modules
+- Treat UUID-backed identifiers as opaque strings in clients
+- Expect some routes to expose both slash and no-slash variants
+- Handle cache-backed analytics and forecast endpoints as derived resources that may legitimately return `404` or empty state
+
+### Documentation usage guidance
+
+- Use `README.md` as the comprehensive system architecture and developer/engineer guide
+- Use `oracle.md` as the reusable prompt template for generating a full backend audit document in Claude
+- The Oracle prompt now explicitly instructs audit coverage for serializers/response mappers, custom error handlers, Flask request hooks, migrations, background jobs, signal hooks, middleware execution order, API versioning, date/time contracts, decimal precision, idempotency, caching behavior, inbound webhook-driven state changes, async job polling contracts, correlation headers, route-guard implementation patterns, shared-shape references, and truncation-recovery guidance
+- Use generated Oracle output as a point-in-time frontend integration artifact, not as the permanent source of repo architecture truth
+
+### Operational invariants
+
+- product pricing validation rejects `selling_price < cost_price`
+- customer mobile uniqueness is store-scoped
+- OCR confirmation must succeed or fail atomically
+- purchase-order receive flows must not partially commit inventory and GRN state on invalid input
+- batch transaction ingestion is intentionally partial-success capable
+
+## Frontend and Integration Notes
+
+- Normalize API responses in a shared client adapter
+- Distinguish owner and staff experiences at the route and feature level
+- Treat `/api/v2/*` developer access separately from merchant/staff JWT access
+- Generate a point-in-time Oracle backend audit from `oracle.md` when you need endpoint-level contracts, field expectations, and verified edge cases
+
+## Deployment Notes
+
+The repo includes deployment infrastructure for containerized environments and cloud targets.
+
+Important operational notes:
+
+- `DATABASE_URL` must resolve to a valid SQLAlchemy/Postgres DSN
+- `REDIS_URL` must point to a real Redis instance in production
+- `CELERY_BROKER_URL` should be a valid broker URL and not a broken suffix-only value
+- `/health` is the canonical liveness endpoint
+- production boot runs readiness checks via `app.utils.security.check_production_readiness`
+
+## Recommended Reading Order for New Engineers
+
+1. `app/factory.py`
+2. `app/__init__.py`
+3. `config.py`
+4. `app/models/__init__.py`
+5. `app/transactions/routes.py` and `app/transactions/services.py`
+6. `app/inventory/routes.py`
+7. `app/analytics/routes.py`
+8. `app/forecasting/engine.py`
+9. `tests/conftest.py`
+10. `oracle.md`
+
+## Verified Backend Audit Snapshot
+
+The latest code-verified backend audit produced `Retailiq-backend.txt` in the repo root.
+
+- **Auth split**: JWT merchant/staff auth lives under `/api/v1/*`, while developer integrations use opaque OAuth bearer tokens under `/oauth` and `/api/v2/*`.
+- **Response shape caution**: the preferred envelope is `format_response(...)`, but several routes still return raw `jsonify(...)` payloads or partial objects, so client normalization is required.
+- **Tenancy rule**: `store_id` is the primary isolation boundary across operational entities.
+- **Async rule**: OCR, analytics snapshots, GST compilation, webhook delivery, forecasting, and alerting are task-driven and should be treated as eventually consistent.
+- **Realtime rule**: market intelligence uses Socket.IO on the `/market` namespace, but auth is not enforced at connect time yet.
+- **Docs rule**: the generated OpenAPI artifacts are useful for discovery, but the codebase and tests remain the source of truth when they disagree.
+
+## Current Documentation Set
+
+- `README.md`: system architecture and engineer guide
+- `oracle.md`: Oracle Document generator prompt template for producing an exhaustive backend audit with frontend-focused guidance on serializer-visible fields, error envelopes, async flows, versioning, retries, precision, time handling, correlation IDs, route guards, shared object references, and severity-ranked risks
+- `Retailiq-backend.txt`: latest verified backend findings artifact for frontend and integration planning; now includes the Oracle Expansion Appendix with code-backed auth, endpoint, serialization, and screen notes
+- `API_GUIDE.md`: additional project API notes
+- `DEPLOYMENT.md`: deployment-specific instructions
 
 ---
 
-## 🛰 Production Readiness Checklist
-
-- [x] **Audit Invariants**: `AuditMixin` applied to all critical tables.
-- [x] **Financial Integrity**: Ledger account balances must match sum of transactions.
-- [x] **Rate Limiting**: Applied to all public endpoints via Redis.
-- [x] **Chunk 1 Remediation**: Auth & Core verified.
-- [x] **Chunk 3 Remediation**: Transactions, Inventory, Receipts verified.
-- [x] **Global Routing Alignment**: Verified 100% pass for Vision, NLP, Receipts, Store, and WhatsApp (53 tests).
-- [x] **Marketplace Remediation**: Verified 100% pass (18 tests).
-- [x] **Specialized Modules Stabilization**: Verified 100% pass for Email, Tasks, and Webhooks (18 tests).
-- [x] **Finance & Expansion Modules**: Reconciled 103 migration drift discrepancies (14 tables).
-- [x] **Forecasting Engine**: Integrated EnsembleForecaster with Ridge fallback. NumPy 2.0 compatibility patched.
-- [x] **Decisions Engine**: Implemented `_dedup_and_sort` for rule deduplication and priority-based sorting.
-- [x] **Full Suite Verification**: **406 passed, 0 failed** (100% pass rate, verified locally).
-- [x] **Vision Realization**: Receipt OCR is implemented and test-covered; shelf analysis is the remaining future enhancement.
-- [x] **NLP Realization**: Deterministic assistant and recommender now answer from store data; RAG remains a future enhancement.
-
----
 © 2026 Team RetailIQ.
