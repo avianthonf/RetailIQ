@@ -60,7 +60,7 @@ jobs:
       - name: Install tools
         run: |
           source .venv/bin/activate
-          uv pip install ruff==0.4.4 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
+          uv pip install ruff==0.15.6 bandit==1.7.8 pip-audit==2.7.3 alembic==1.13.1
 
       - name: Ruff check (lint)
         run: |
