@@ -44,8 +44,9 @@ def _seed_store_summary(store_id, target_date, revenue=1000.0, profit=200.0):
     _db.session.commit()
 
 
-def _seed_alert(store_id, alert_type="LOW_STOCK", priority="HIGH", message="Test alert",
-                product_name=None, resolved=False):
+def _seed_alert(
+    store_id, alert_type="LOW_STOCK", priority="HIGH", message="Test alert", product_name=None, resolved=False
+):
     """Insert a single alert row."""
     alert = Alert(
         store_id=store_id,
@@ -171,8 +172,12 @@ class TestDashboardOverview:
         body = resp.get_json()
         data = body.get("data", body)
         # inventory_at_risk, outstanding_pos, loyalty, online all have empty points
-        for key in ("inventory_at_risk_sparkline", "outstanding_pos_sparkline",
-                     "loyalty_redemptions_sparkline", "online_orders_sparkline"):
+        for key in (
+            "inventory_at_risk_sparkline",
+            "outstanding_pos_sparkline",
+            "loyalty_redemptions_sparkline",
+            "online_orders_sparkline",
+        ):
             assert key in data
             assert data[key]["points"] == []
         # sales and gross_margin sparklines should have the metric name
@@ -185,8 +190,14 @@ class TestDashboardOverview:
         assert resp.status_code == 200
         body = resp.get_json()
         data = body.get("data", body)
-        for key in ("sales_delta", "gross_margin_delta", "inventory_at_risk_delta",
-                     "outstanding_pos_delta", "loyalty_redemptions_delta", "online_orders_delta"):
+        for key in (
+            "sales_delta",
+            "gross_margin_delta",
+            "inventory_at_risk_delta",
+            "outstanding_pos_delta",
+            "loyalty_redemptions_delta",
+            "online_orders_delta",
+        ):
             assert key in data
             assert isinstance(data[key], str)
 
@@ -226,7 +237,17 @@ class TestDashboardAlerts:
         body = resp.get_json()
         data = body.get("data", body)
         alert = data["alerts"][0]
-        required_keys = {"id", "type", "severity", "title", "message", "timestamp", "source", "acknowledged", "resolved"}
+        required_keys = {
+            "id",
+            "type",
+            "severity",
+            "title",
+            "message",
+            "timestamp",
+            "source",
+            "acknowledged",
+            "resolved",
+        }
         assert required_keys.issubset(alert.keys())
 
     def test_requires_auth(self, client):
@@ -353,8 +374,17 @@ class TestDashboardIncidents:
         body = resp.get_json()
         data = body.get("data", body)
         incident = data["incidents"][0]
-        required_keys = {"id", "title", "description", "severity", "status", "impacted_services",
-                         "created_at", "updated_at", "estimated_resolution"}
+        required_keys = {
+            "id",
+            "title",
+            "description",
+            "severity",
+            "status",
+            "impacted_services",
+            "created_at",
+            "updated_at",
+            "estimated_resolution",
+        }
         assert required_keys.issubset(incident.keys())
 
     def test_resolved_not_shown(self, client, owner_headers, test_store):

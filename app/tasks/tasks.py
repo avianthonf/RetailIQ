@@ -221,9 +221,7 @@ class _RedisLock:
 
         if self._redis is not None:
             try:
-                self._acquired = bool(
-                    self._redis.set(self.key, "1", nx=True, ex=self.expiry)
-                )
+                self._acquired = bool(self._redis.set(self.key, "1", nx=True, ex=self.expiry))
             except Exception:
                 logger.warning("Redis lock acquire failed for %s, proceeding without lock", self.key)
                 self._acquired = True

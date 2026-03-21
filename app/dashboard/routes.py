@@ -49,6 +49,7 @@ def _store_id():
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _pct_delta(current, previous):
     """Return a human-friendly delta string like '+12.5%' or '-3.2%'."""
     if not previous:
@@ -78,14 +79,12 @@ def _build_sparkline(rows, metric_key, value_key):
     """Build a sparkline dict from a list of row-dicts."""
     return {
         "metric": metric_key,
-        "points": [
-            {"timestamp": r["timestamp"], "value": float(r.get(value_key, 0))}
-            for r in rows
-        ],
+        "points": [{"timestamp": r["timestamp"], "value": float(r.get(value_key, 0))} for r in rows],
     }
 
 
 # ── /overview ────────────────────────────────────────────────────────────────
+
 
 @dashboard_bp.route("/overview")
 @require_auth
@@ -277,6 +276,7 @@ def _overview_impl():
 
 # ── /alerts ──────────────────────────────────────────────────────────────────
 
+
 @dashboard_bp.route("/alerts")
 @require_auth
 def alerts():
@@ -323,22 +323,27 @@ def _alerts_impl():
     for r in rows:
         snoozed = r.snoozed_until is not None
         ts = _to_iso(r.created_at)
-        alert_list.append({
-            "id": str(r.alert_id),
-            "type": (r.alert_type or "system").lower(),
-            "severity": priority_to_severity.get(r.priority, "low"),
-            "title": f"{r.alert_type or 'Alert'}: {r.product_name}" if r.product_name else (r.alert_type or "Alert"),
-            "message": r.message or "",
-            "timestamp": ts,
-            "source": "inventory" if r.alert_type and "stock" in r.alert_type.lower() else "system",
-            "acknowledged": snoozed,
-            "resolved": False,
-        })
+        alert_list.append(
+            {
+                "id": str(r.alert_id),
+                "type": (r.alert_type or "system").lower(),
+                "severity": priority_to_severity.get(r.priority, "low"),
+                "title": f"{r.alert_type or 'Alert'}: {r.product_name}"
+                if r.product_name
+                else (r.alert_type or "Alert"),
+                "message": r.message or "",
+                "timestamp": ts,
+                "source": "inventory" if r.alert_type and "stock" in r.alert_type.lower() else "system",
+                "acknowledged": snoozed,
+                "resolved": False,
+            }
+        )
 
     return format_response(data={"alerts": alert_list, "has_more": False, "next_cursor": None})
 
 
 # ── /live-signals ────────────────────────────────────────────────────────────
+
 
 @dashboard_bp.route("/live-signals")
 @require_auth
@@ -386,25 +391,30 @@ def _live_signals_impl():
             insight = f"Market signal: {sig_type} in {r.region_code or 'region'}"
             recommendation = "Monitor market conditions and adjust strategy"
 
-        signals.append({
-            "id": f"signal-{r.id}",
-            "sku": "",
-            "product_name": sig_type,
-            "delta": delta_str,
-            "region": r.region_code or "",
-            "insight": insight,
-            "recommendation": recommendation,
-            "timestamp": ts,
-        })
+        signals.append(
+            {
+                "id": f"signal-{r.id}",
+                "sku": "",
+                "product_name": sig_type,
+                "delta": delta_str,
+                "region": r.region_code or "",
+                "insight": insight,
+                "recommendation": recommendation,
+                "timestamp": ts,
+            }
+        )
 
     # If no signals exist yet, return empty list (no mock data)
-    return format_response(data={
-        "signals": signals,
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-    })
+    return format_response(
+        data={
+            "signals": signals,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
 
 # ── /forecasts/stores ────────────────────────────────────────────────────────
+
 
 @dashboard_bp.route("/forecasts/stores")
 @require_auth
@@ -445,11 +455,13 @@ def _forecasts_stores_impl():
         lower = float(r.lower_bound or 0) if r.lower_bound else fval * 0.85
         upper = float(r.upper_bound or 0) if r.upper_bound else fval * 1.15
         confidence = round(1.0 - (upper - lower) / (fval * 2) if fval else 0.8, 2)
-        forecast_data.append({
-            "date": str(r.forecast_date),
-            "predicted_sales": round(fval, 2),
-            "confidence": max(0.0, min(1.0, confidence)),
-        })
+        forecast_data.append(
+            {
+                "date": str(r.forecast_date),
+                "predicted_sales": round(fval, 2),
+                "confidence": max(0.0, min(1.0, confidence)),
+            }
+        )
 
     total_predicted = sum(f["predicted_sales"] for f in forecast_data)
 
@@ -459,9 +471,9 @@ def _forecasts_stores_impl():
             "store_name": store_name,
             "forecast": forecast_data,
             "total_predicted": round(total_predicted, 2),
-            "accuracy": round(
-                sum(f["confidence"] for f in forecast_data) / len(forecast_data), 2
-            ) if forecast_data else None,
+            "accuracy": round(sum(f["confidence"] for f in forecast_data) / len(forecast_data), 2)
+            if forecast_data
+            else None,
         }
     ]
 
@@ -469,6 +481,7 @@ def _forecasts_stores_impl():
 
 
 # ── /incidents/active ────────────────────────────────────────────────────────
+
 
 @dashboard_bp.route("/incidents/active")
 @require_auth
@@ -501,26 +514,27 @@ def _active_incidents_impl():
     for r in rows:
         created = _to_iso(r.created_at)
         updated = _to_iso(r.updated_at) if r.updated_at else created
-        est_resolution = (
-            (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
-        )
+        est_resolution = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
 
-        incidents.append({
-            "id": f"incident-{r.alert_id}",
-            "title": r.alert_type or "Active Incident",
-            "description": r.message or "No details available",
-            "severity": "high" if r.priority == "CRITICAL" else "medium",
-            "status": "investigating",
-            "impacted_services": [r.alert_type.lower()] if r.alert_type else ["system"],
-            "created_at": created,
-            "updated_at": updated,
-            "estimated_resolution": est_resolution,
-        })
+        incidents.append(
+            {
+                "id": f"incident-{r.alert_id}",
+                "title": r.alert_type or "Active Incident",
+                "description": r.message or "No details available",
+                "severity": "high" if r.priority == "CRITICAL" else "medium",
+                "status": "investigating",
+                "impacted_services": [r.alert_type.lower()] if r.alert_type else ["system"],
+                "created_at": created,
+                "updated_at": updated,
+                "estimated_resolution": est_resolution,
+            }
+        )
 
     return format_response(data={"incidents": incidents})
 
 
 # ── /alerts/feed ─────────────────────────────────────────────────────────────
+
 
 @dashboard_bp.route("/alerts/feed")
 @require_auth
@@ -571,17 +585,21 @@ def _alerts_feed_impl():
     for r in rows:
         snoozed = r.snoozed_until is not None
         ts = _to_iso(r.created_at)
-        alert_list.append({
-            "id": str(r.alert_id),
-            "type": (r.alert_type or "system").lower(),
-            "severity": priority_to_severity.get(r.priority, "low"),
-            "title": f"{r.alert_type or 'Alert'}: {r.product_name}" if r.product_name else (r.alert_type or "Alert"),
-            "message": r.message or "",
-            "timestamp": ts,
-            "source": "inventory" if r.alert_type and "stock" in r.alert_type.lower() else "system",
-            "acknowledged": snoozed,
-            "resolved": False,
-        })
+        alert_list.append(
+            {
+                "id": str(r.alert_id),
+                "type": (r.alert_type or "system").lower(),
+                "severity": priority_to_severity.get(r.priority, "low"),
+                "title": f"{r.alert_type or 'Alert'}: {r.product_name}"
+                if r.product_name
+                else (r.alert_type or "Alert"),
+                "message": r.message or "",
+                "timestamp": ts,
+                "source": "inventory" if r.alert_type and "stock" in r.alert_type.lower() else "system",
+                "acknowledged": snoozed,
+                "resolved": False,
+            }
+        )
 
     next_cursor = str(offset + limit) if has_more else None
 
