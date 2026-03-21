@@ -527,12 +527,29 @@ class LoyaltyProgram(Base, AuditMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
+class LoyaltyTier(Base, AuditMixin):
+    __tablename__ = "loyalty_tiers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    program_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("loyalty_programs.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    min_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_points: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    benefits: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    multiplier: Mapped[float | None] = mapped_column(Numeric(6, 2), default=1.0, server_default="1.0")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+    __table_args__ = (UniqueConstraint("program_id", "name", name="uq_loyalty_tier_program_name"),)
+
+
 class CustomerLoyaltyAccount(Base, AuditMixin):
     __tablename__ = "customer_loyalty_accounts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     customer_id: Mapped[int] = mapped_column(Integer, ForeignKey("customers.customer_id"), unique=True, nullable=False)
     store_id: Mapped[int] = mapped_column(Integer, ForeignKey("stores.store_id"), nullable=False)
+    tier_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("loyalty_tiers.id"), nullable=True)
     total_points: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default="0")
     redeemable_points: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default="0")
     lifetime_earned: Mapped[float | None] = mapped_column(Numeric(12, 2), default=0, server_default="0")
@@ -645,6 +662,22 @@ class GSTFilingPeriod(Base, AuditMixin):
     __table_args__ = (UniqueConstraint("store_id", "period", name="uq_store_period"),)
 
 
+class GSTHSNMapping(Base, AuditMixin):
+    __tablename__ = "gst_hsn_mappings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey("stores.store_id"), nullable=False)
+    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.category_id"), nullable=False)
+    hsn_code: Mapped[str] = mapped_column(String(8), ForeignKey("hsn_master.hsn_code"), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
+
+    __table_args__ = (
+        UniqueConstraint("store_id", "category_id", name="uq_gst_hsn_mapping_store_category"),
+        UniqueConstraint("store_id", "hsn_code", name="uq_gst_hsn_mapping_store_hsn"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # WHATSAPP INTEGRATION MODELS
 # ---------------------------------------------------------------------------
@@ -689,6 +722,41 @@ class WhatsAppMessageLog(Base, AuditMixin):
     sent_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class WhatsAppCampaign(Base, AuditMixin):
+    __tablename__ = "whatsapp_campaigns"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey("stores.store_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("whatsapp_templates.id"), nullable=True
+    )
+    template_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    recipients: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    recipient_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    sent_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    delivered_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    read_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), default="DRAFT", server_default="DRAFT")
+    scheduled_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class WhatsAppContactPreference(Base, AuditMixin):
+    __tablename__ = "whatsapp_contact_preferences"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id: Mapped[int] = mapped_column(Integer, ForeignKey("stores.store_id"), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="OPTED_IN", server_default="OPTED_IN")
+    opted_in_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+    opted_out_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+    __table_args__ = (UniqueConstraint("store_id", "phone", name="uq_whatsapp_contact_pref_store_phone"),)
 
 
 # ---------------------------------------------------------------------------

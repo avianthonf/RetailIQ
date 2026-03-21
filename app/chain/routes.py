@@ -2,7 +2,7 @@ import uuid as _uuid
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
-from flask import g, jsonify, request
+from flask import g, request
 from marshmallow import ValidationError
 from sqlalchemy import func
 
@@ -14,6 +14,7 @@ from ..models import (
     ChainDailyAggregate,
     DailyStoreSummary,
     InterStoreTransferSuggestion,
+    Product,
     Store,
     StoreGroup,
     StoreGroupMembership,
@@ -32,6 +33,32 @@ def require_chain_owner(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def _serialize_group(group, memberships=None):
+    memberships = memberships or []
+    return {
+        "group_id": str(group.id),
+        "name": group.name,
+        "description": getattr(group, "description", None),
+        "owner_user_id": group.owner_user_id,
+        "created_at": group.created_at.isoformat() if group.created_at else None,
+        "updated_at": group.updated_at.isoformat() if group.updated_at else None,
+        "member_store_ids": [membership.store_id for membership in memberships],
+    }
+
+
+def _serialize_transfer(suggestion):
+    return {
+        "id": str(suggestion.id),
+        "from_store": suggestion.from_store_id,
+        "to_store": suggestion.to_store_id,
+        "product": suggestion.product_id,
+        "qty": float(suggestion.suggested_qty) if suggestion.suggested_qty else 0.0,
+        "reason": suggestion.reason,
+        "status": suggestion.status,
+        "created_at": suggestion.created_at.isoformat() if suggestion.created_at else None,
+    }
 
 
 @chain_bp.route("/groups", methods=["POST"])
@@ -54,6 +81,50 @@ def create_group():
     db.session.commit()
 
     return format_response(success=True, data={"group_id": str(group.id), "name": group.name})
+
+
+@chain_bp.route("/groups/<uuid:group_id>", methods=["GET"])
+@require_auth
+@require_chain_owner
+def get_group(group_id):
+    if g.current_user.get("chain_group_id") != str(group_id):
+        return format_response(
+            success=False, error={"code": "FORBIDDEN", "message": "Not owner of this group"}, status_code=403
+        )
+
+    group = db.session.query(StoreGroup).filter_by(id=group_id).first()
+    if not group:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "Group not found"}, status_code=404
+        )
+
+    memberships = db.session.query(StoreGroupMembership).filter_by(group_id=group_id).all()
+    return format_response(success=True, data=_serialize_group(group, memberships))
+
+
+@chain_bp.route("/groups/<uuid:group_id>", methods=["PUT", "PATCH"])
+@require_auth
+@require_chain_owner
+def update_group(group_id):
+    if g.current_user.get("chain_group_id") != str(group_id):
+        return format_response(
+            success=False, error={"code": "FORBIDDEN", "message": "Not owner of this group"}, status_code=403
+        )
+
+    group = db.session.query(StoreGroup).filter_by(id=group_id).first()
+    if not group:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "Group not found"}, status_code=404
+        )
+
+    body = request.get_json() or {}
+    name = body.get("name")
+    if name:
+        group.name = name
+
+    db.session.commit()
+    memberships = db.session.query(StoreGroupMembership).filter_by(group_id=group_id).all()
+    return format_response(success=True, data=_serialize_group(group, memberships))
 
 
 @chain_bp.route("/groups/<uuid:group_id>/stores", methods=["POST"])
@@ -86,6 +157,26 @@ def add_store_to_group(group_id):
     db.session.commit()
 
     return format_response(success=True, data={"membership_id": str(membership.id)}, status_code=201)
+
+
+@chain_bp.route("/groups/<uuid:group_id>/stores/<int:store_id>", methods=["DELETE"])
+@require_auth
+@require_chain_owner
+def remove_store_from_group(group_id, store_id):
+    if g.current_user.get("chain_group_id") != str(group_id):
+        return format_response(
+            success=False, error={"code": "FORBIDDEN", "message": "Not owner of this group"}, status_code=403
+        )
+
+    membership = db.session.query(StoreGroupMembership).filter_by(group_id=group_id, store_id=store_id).first()
+    if not membership:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "Store membership not found"}, status_code=404
+        )
+
+    db.session.delete(membership)
+    db.session.commit()
+    return format_response(success=True, data={"store_id": store_id, "removed": True})
 
 
 @chain_bp.route("/dashboard", methods=["GET"])
@@ -237,20 +328,52 @@ def evaluate_chain_comparison():
 def get_transfers():
     group_id = _uuid.UUID(g.current_user["chain_group_id"])
     suggestions = db.session.query(InterStoreTransferSuggestion).filter_by(group_id=group_id).all()
-    transfers = [
-        {
-            "id": str(s.id),
-            "from_store": s.from_store_id,
-            "to_store": s.to_store_id,
-            "product": s.product_id,
-            "qty": float(s.suggested_qty) if s.suggested_qty else 0.0,
-            "reason": s.reason,
-            "status": s.status,
-        }
-        for s in suggestions
-    ]
+    transfers = [_serialize_transfer(suggestion) for suggestion in suggestions]
 
     return format_response(success=True, data=transfers)
+
+
+@chain_bp.route("/transfers", methods=["POST"])
+@require_auth
+@require_chain_owner
+def create_transfer():
+    group_id = _uuid.UUID(g.current_user["chain_group_id"])
+    body = request.get_json() or {}
+
+    required_fields = ("from_store_id", "to_store_id", "product_id", "quantity")
+    missing = [field for field in required_fields if body.get(field) in (None, "")]
+    if missing:
+        return format_response(
+            success=False,
+            error={"code": "VALIDATION_ERROR", "message": f"Missing required fields: {', '.join(missing)}"},
+            status_code=400,
+        )
+
+    from_store = db.session.query(Store).filter_by(store_id=body["from_store_id"]).first()
+    to_store = db.session.query(Store).filter_by(store_id=body["to_store_id"]).first()
+    product = db.session.query(Product).filter_by(product_id=body["product_id"]).first()
+    if not from_store or not to_store:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "Store not found"}, status_code=404
+        )
+    if not product:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "Product not found"}, status_code=404
+        )
+
+    suggestion = InterStoreTransferSuggestion(
+        group_id=group_id,
+        from_store_id=body["from_store_id"],
+        to_store_id=body["to_store_id"],
+        product_id=body["product_id"],
+        suggested_qty=body["quantity"],
+        reason=body.get("notes") or "Manual transfer created from chain console",
+        status="PENDING",
+    )
+    db.session.add(suggestion)
+    db.session.commit()
+
+    return format_response(success=True, data=_serialize_transfer(suggestion), status_code=201)
 
 
 @chain_bp.route("/transfers/<uuid:transfer_id>/confirm", methods=["POST"])
