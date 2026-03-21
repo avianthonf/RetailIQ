@@ -17,6 +17,7 @@ from app.models.finance_models import (
     MerchantKYC,
     PaymentTransaction,
     TreasuryConfig,
+    TreasuryTransaction,
 )
 
 from ..auth.decorators import require_auth, require_role
@@ -254,10 +255,19 @@ def treasury_balance():
         .filter_by(store_id=g.current_user["store_id"], account_type="RESERVE")
         .first()
     )
+    # Pull latest yield from the most recent treasury transaction for this store
+    latest_yield_tx = (
+        db.session.query(TreasuryTransaction)
+        .filter_by(store_id=g.current_user["store_id"], type="YIELD_ACCRUAL")
+        .order_by(TreasuryTransaction.created_at.desc())
+        .first()
+    )
+    yield_bps = latest_yield_tx.current_yield_bps if latest_yield_tx and latest_yield_tx.current_yield_bps else 450
+
     return jsonify(
         {
             "available": float(account.balance) if account else 0,
-            "yield_bps": 450,  # Mock 4.5%
+            "yield_bps": yield_bps,
             "currency": "INR",
         }
     ), 200

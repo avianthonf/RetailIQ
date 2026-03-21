@@ -9,23 +9,19 @@ ops_bp = Blueprint("ops", __name__)
 
 @ops_bp.route("/maintenance")
 def maintenance():
-    """Get maintenance schedule information."""
+    """Get maintenance schedule information.
+
+    Returns an empty schedule when no maintenance is planned.
+    A future admin panel can POST maintenance windows to a dedicated table;
+    until then this endpoint truthfully reports "nothing scheduled".
+    """
     return jsonify(
         {
             "data": {
-                "scheduled_maintenance": [
-                    {
-                        "id": "maint-001",
-                        "title": "System Upgrade",
-                        "description": "Database optimization and security patches",
-                        "scheduled_start": "2026-03-14T02:00:00Z",
-                        "scheduled_end": "2026-03-14T04:00:00Z",
-                        "impact": "System will be read-only during maintenance",
-                        "status": "scheduled",
-                    }
-                ],
+                "scheduled_maintenance": [],
                 "ongoing_incidents": [],
                 "system_status": "healthy",
+                "checked_at": datetime.now(timezone.utc).isoformat(),
             }
         }
     )

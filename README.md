@@ -13,6 +13,8 @@ This README is a code-verified architecture and engineering guide for the curren
 
 For the reusable Oracle Document generator prompt, see `oracle.md`.
 
+> **Audit status (latest):** All 6 dashboard endpoints query real DB tables (zero mock data) and now use consistent named-key list envelopes for dashboard collections. Treasury yield reads from `TreasuryTransaction`. `_RedisLock` uses `SET NX EX`. Ops maintenance returns truthful empty schedule. 34 dashboard regression tests pass. Backend lint clean (`ruff`).
+
 ## 🏗 System Architecture (Core Engine v1.0)
 
 RetailIQ uses a Flask application factory with SQLAlchemy, Redis-backed limiter/session infrastructure, and Celery for async and scheduled work.
@@ -21,7 +23,7 @@ RetailIQ uses a Flask application factory with SQLAlchemy, Redis-backed limiter/
 
 - **API process**: Flask app served through WSGI/Gunicorn-compatible entrypoints
 - **Database**: PostgreSQL in normal runtime, SQLite in-memory during tests
-- **Redis**: rate limiting, token/session state, broker/backend support
+- **Redis**: rate limiting, token/session state, distributed locking (`_RedisLock`), broker/backend support
 - **Worker**: Celery task execution for snapshots, OCR, alerts, webhook delivery, and batch analytics jobs
 - **Scheduler**: Celery Beat or equivalent scheduler for periodic background jobs
 
@@ -281,8 +283,17 @@ Defines extension singletons, blueprint registration, and JSON error handlers. R
 #### `market_intelligence/` (External Signals)
 - market signals, price indices, alerts, intelligence reports, and market-aware pricing context
 
+#### `dashboard/` (Executive Dashboard)
+- `routes.py`: 6 DB-backed endpoints for overview KPIs, alerts, live signals, forecasts, incidents, and paginated alert feeds
+- Queries `daily_store_summary`, `products`, `purchase_orders`, `loyalty_transactions`, `alerts`, `market_signals`, `forecast_cache`, and `stores`
+- Helper utilities: `_pct_delta`, `_int_delta`, `_to_iso`, `_build_sparkline`
+
+#### `ops/` (Operations)
+- `routes.py`: maintenance schedule endpoint; returns truthful empty schedule when no maintenance is planned
+
 #### `tasks/` (Background Workers)
 - periodic jobs for snapshots, alerts, forecasts, GST compilation, OCR, and operational maintenance
+- `_RedisLock`: distributed lock using Redis `SET NX EX`; falls back to in-process lock when Redis is unavailable
 
 #### `utils/` (Infrastructure Helpers)
 - reusable infrastructure helpers including security and webhook delivery support
@@ -385,6 +396,7 @@ docker compose up -d
 Targeted regression commands:
 
 ```bash
+pytest tests/test_dashboard.py
 pytest tests/test_auth_flow.py tests/test_inventory.py tests/test_transactions.py tests/test_receipts.py
 pytest tests/test_analytics.py tests/test_pricing.py tests/test_store.py tests/test_suppliers.py
 pytest tests/test_loyalty.py tests/test_finance.py tests/test_forecasting.py tests/test_gst.py
@@ -428,7 +440,7 @@ pytest -v --tb=short -p no:cacheprovider
 - purchase-order receive flows must not partially commit inventory and GRN state on invalid input
 - batch transaction ingestion is intentionally partial-success capable
 
-## Frontend and Integration Notes
+## General Frontend and Integration Notes
 
 - Normalize API responses in a shared client adapter
 - Distinguish owner and staff experiences at the route and feature level
@@ -460,24 +472,66 @@ Important operational notes:
 9. `tests/conftest.py`
 10. `oracle.md`
 
+## Dashboard Endpoint Reference
+
+All dashboard endpoints require JWT auth and are scoped to the authenticated user's `store_id`.
+
+| Endpoint | Method | Data Source | Description |
+|---|---|---|---|
+| `/api/v1/dashboard/overview` | GET | `daily_store_summary`, `products`, `purchase_orders`, `loyalty_transactions`, `transactions` | KPI cards: sales, margin, inventory at risk, outstanding POs, loyalty redemptions, online orders; each with delta and sparkline |
+| `/api/v1/dashboard/alerts` | GET | `alerts` | Unresolved alerts ordered by priority (CRITICAL > HIGH > MEDIUM > LOW) |
+| `/api/v1/dashboard/live-signals` | GET | `market_signals` | Latest 10 market signals with insight text and recommendations |
+| `/api/v1/dashboard/forecasts/stores` | GET | `forecast_cache`, `stores` | Forward-looking sales forecasts with confidence intervals |
+| `/api/v1/dashboard/incidents/active` | GET | `alerts` (CRITICAL/HIGH only) | Active incidents derived from high-severity unresolved alerts |
+| `/api/v1/dashboard/alerts/feed` | GET | `alerts` | Paginated alert feed with `limit`/`offset` query params |
+
+Dashboard collection endpoints use named list envelopes inside `data`: `alerts`, `signals`, `forecasts`, and `incidents`.
+
+### Overview KPI Calculation Details
+
+- **sales**: `revenue` from `daily_store_summary` for today
+- **sales_delta**: percentage change vs yesterday's revenue
+- **gross_margin**: `(profit / revenue) * 100` from today's summary
+- **inventory_at_risk**: count of active products where `current_stock <= reorder_level`
+- **outstanding_pos**: count of purchase orders with status `DRAFT` or `SENT`
+- **loyalty_redemptions**: sum of `REDEEM` transactions from `loyalty_transactions` in the last 7 days
+- **online_orders**: count of today's transactions where `payment_mode` contains "online"
+
 ## Verified Backend Audit Snapshot
 
 The latest code-verified backend audit produced `Retailiq-backend.txt` in the repo root.
 
 - **Auth split**: JWT merchant/staff auth lives under `/api/v1/*`, while developer integrations use opaque OAuth bearer tokens under `/oauth` and `/api/v2/*`.
-- **Response shape caution**: the preferred envelope is `format_response(...)`, but several routes still return raw `jsonify(...)` payloads or partial objects, so client normalization is required.
+- **Response shape caution**: the preferred envelope is `format_response(...)`, and the dashboard module now consistently uses named list keys (`alerts`, `signals`, `forecasts`, `incidents`), but several non-dashboard routes still return raw `jsonify(...)` payloads or partial objects, so client normalization is still required across the wider API surface.
 - **Tenancy rule**: `store_id` is the primary isolation boundary across operational entities.
 - **Async rule**: OCR, analytics snapshots, GST compilation, webhook delivery, forecasting, and alerting are task-driven and should be treated as eventually consistent.
 - **Realtime rule**: market intelligence uses Socket.IO on the `/market` namespace, but auth is not enforced at connect time yet.
 - **Docs rule**: the generated OpenAPI artifacts are useful for discovery, but the codebase and tests remain the source of truth when they disagree.
+- **Dashboard rule**: all 6 dashboard endpoints query real aggregation tables; zero mock/hardcoded data remains.
+- **Treasury rule**: `yield_bps` in `/api/v2/finance/treasury/balance` reads from the latest `TreasuryTransaction` with type `YIELD_ACCRUAL`; falls back to 450 bps if no accrual exists.
+- **Locking rule**: `_RedisLock` in `app/tasks/tasks.py` uses Redis `SET NX EX` for distributed locking; falls back to always-acquired when Redis is unavailable.
+
+## Audit Change Log
+
+| Date | Change | Files Modified |
+|---|---|---|
+| Latest | Replace all 6 mock dashboard endpoints with real DB queries | `app/dashboard/routes.py` |
+| Latest | Fix hardcoded `yield_bps=450` to query `TreasuryTransaction` | `app/finance/routes.py` |
+| Latest | Add `TreasuryTransaction` import to finance routes | `app/finance/routes.py` |
+| Latest | Implement real `_RedisLock` with `SET NX EX` and fallback | `app/tasks/tasks.py` |
+| Latest | Remove fake maintenance entry from ops route | `app/ops/routes.py` |
+| Latest | Add 34 dashboard regression tests (sparklines, deltas, input validation, accuracy) | `tests/test_dashboard.py` |
+| Latest | Standardize dashboard forecast/incident envelopes and align tests/docs | `app/dashboard/routes.py`, `tests/test_dashboard.py`, `README.md` |
 
 ## Current Documentation Set
 
-- `README.md`: system architecture and engineer guide
+- `README.md`: system architecture and engineer guide (this file)
 - `oracle.md`: Oracle Document generator prompt template for producing an exhaustive backend audit with frontend-focused guidance on serializer-visible fields, error envelopes, async flows, versioning, retries, precision, time handling, correlation IDs, route guards, shared object references, and severity-ranked risks
 - `Retailiq-backend.txt`: latest verified backend findings artifact for frontend and integration planning; now includes the Oracle Expansion Appendix with code-backed auth, endpoint, serialization, and screen notes
 - `API_GUIDE.md`: additional project API notes
 - `DEPLOYMENT.md`: deployment-specific instructions
+- `tests/test_dashboard.py`: 34 regression tests for all dashboard, ops, and related endpoints
+- `frontend-specs/frontend-api-contract.md`: frontend API contract reference document
 
 ---
 

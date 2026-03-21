@@ -1,6 +1,5 @@
 import bcrypt
-from flask import Blueprint, g, jsonify, redirect, render_template, request, url_for
-from marshmallow import ValidationError
+from flask import Blueprint, g, jsonify, redirect, request
 
 from app import db, limiter
 from app.auth.decorators import require_auth
@@ -38,13 +37,15 @@ def authorize():
     # For this implementation, we'll auto-approve if it's a POST or just a simplified GET.
 
     if request.method == "GET":
-        # Simplified: Auto-approve for now or return a "Consent required" message
-        # In a real scenario, this would serve an HTML page with "App X wants to access Y. Allow/Deny?"
         return format_response(
             True,
             data={
+                "client_id": client_id,
                 "app_name": app.name,
+                "description": app.description,
+                "redirect_uri": redirect_uri,
                 "scopes": scope.split(" "),
+                "state": state,
                 "message": "Please POST to this endpoint with 'confirm=true' to authorize.",
             },
         )
@@ -61,6 +62,16 @@ def authorize():
     redirect_url = f"{redirect_uri}{separator}code={code}"
     if state:
         redirect_url += f"&state={state}"
+
+    if request.is_json:
+        return format_response(
+            True,
+            data={
+                "redirect_url": redirect_url,
+                "code": code,
+                "state": state,
+            },
+        )
 
     return redirect(redirect_url)
 

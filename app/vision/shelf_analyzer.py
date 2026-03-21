@@ -2,7 +2,11 @@ import logging
 import os
 
 from PIL import Image
-from ultralytics import YOLO
+
+try:
+    from ultralytics import YOLO
+except Exception:  # pragma: no cover - optional dependency
+    YOLO = None
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +22,9 @@ class ShelfAnalyzer:
         """
         self.model_path = model_path
         self.model = None
+        if YOLO is None:
+            logger.warning("ultralytics is not installed. Shelf analysis will return a graceful fallback.")
+            return
         try:
             if os.path.exists(model_path):
                 self.model = YOLO(model_path)
