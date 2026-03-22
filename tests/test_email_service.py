@@ -87,6 +87,31 @@ def test_send_otp_email_via_smtp(mock_smtp_class, app):
 
 
 @patch("app.email.smtplib.SMTP")
+def test_send_otp_email_accepts_mail_aliases(mock_smtp_class, app):
+    """Legacy MAIL_USERNAME / MAIL_PASSWORD aliases should also work."""
+    app.config["EMAIL_ENABLED"] = True
+    app.config["SMTP_USER"] = ""
+    app.config["SMTP_PASSWORD"] = ""
+    app.config["MAIL_USERNAME"] = "alias@gmail.com"
+    app.config["MAIL_PASSWORD"] = "alias-password"
+
+    mock_server = MagicMock()
+    mock_smtp_class.return_value.__enter__ = MagicMock(return_value=mock_server)
+
+    with app.app_context():
+        from app.email import send_otp_email
+
+        result = send_otp_email("user@example.com", "987654")
+        assert result is True
+
+    mock_server.login.assert_called_once_with("alias@gmail.com", "alias-password")
+    mock_server.sendmail.assert_called_once()
+
+    app.config["MAIL_USERNAME"] = ""
+    app.config["MAIL_PASSWORD"] = ""
+
+
+@patch("app.email.smtplib.SMTP")
 def test_send_password_reset_email_via_smtp(mock_smtp_class, app):
     """With SMTP config set, password reset email goes through SMTP."""
     app.config["EMAIL_ENABLED"] = True

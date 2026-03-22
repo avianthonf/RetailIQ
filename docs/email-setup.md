@@ -21,9 +21,11 @@ If you want to receive actual emails during development:
 
 3. **Add to .env file**:
    ```bash
-   MAIL_USERNAME=your-email@gmail.com
-   MAIL_PASSWORD=your-16-character-app-password
+   SMTP_USER=your-email@gmail.com
+   SMTP_PASSWORD=your-16-character-app-password
    ```
+
+   The backend also accepts the legacy `MAIL_USERNAME` / `MAIL_PASSWORD` names, but `SMTP_USER` / `SMTP_PASSWORD` are the primary settings.
 
 ## Notes
 - Use App Passwords, not your regular password
