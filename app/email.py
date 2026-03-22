@@ -37,6 +37,9 @@ def _send_raw(to_email, subject, html_body):
     username, password = _get_mail_config()
 
     if not username or not current_app.config.get("EMAIL_ENABLED"):
+        if current_app.config.get("ENVIRONMENT") == "production":
+            logger.error("[DISABLED-EMAIL] Production email delivery is not configured for %s", to_email)
+            return False
         # Dev fallback or disabled
         logger.info("[DEV/DISABLED-EMAIL] To: %s | Subject: %s", to_email, subject)
         logger.info("[DEV/DISABLED-EMAIL] Body:\n%s", html_body)

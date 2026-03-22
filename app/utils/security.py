@@ -155,3 +155,12 @@ def check_production_readiness():
 
     # 3. Check JWT keys if RS256 is used (placeholder check for the test)
     # The test test_production_refuses_default_db_credentials expects a match for "default dev credentials"
+
+    # 4. Email OTP delivery must be explicitly enabled in production
+    if not current_app.config.get("EMAIL_ENABLED"):
+        raise RuntimeError("EMAIL_ENABLED must be true in production")
+
+    smtp_user = current_app.config.get("SMTP_USER")
+    smtp_password = current_app.config.get("SMTP_PASSWORD")
+    if not smtp_user or not smtp_password:
+        raise RuntimeError("SMTP_USER and SMTP_PASSWORD are required in production")

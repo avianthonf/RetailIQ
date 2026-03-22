@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 import bcrypt
-from flask import request
+from flask import current_app, request
 from marshmallow import ValidationError
+from sqlalchemy import func
 
 from .. import db, limiter
 from ..models import Store, User
@@ -48,6 +49,16 @@ def register():
             error={"code": "DUPLICATE_MOBILE"},
         )
 
+    normalized_email = data["email"].strip().lower()
+    existing_email_user = db.session.query(User).filter(func.lower(User.email) == normalized_email).first()
+    if existing_email_user:
+        return format_response(
+            success=False,
+            message="Email already registered",
+            status_code=422,
+            error={"code": "DUPLICATE_EMAIL"},
+        )
+
     hashed_password = bcrypt.hashpw(data["password"].encode("utf-8"), bcrypt.gensalt(12)).decode("utf-8")
 
     role = data.get("role", "owner")
@@ -56,7 +67,7 @@ def register():
         mobile_number=data["mobile_number"],
         password_hash=hashed_password,
         full_name=data["full_name"],
-        email=data.get("email"),
+        email=normalized_email,
         role=role,
         is_active=False,
     )
@@ -72,9 +83,17 @@ def register():
 
     db.session.commit()
 
-    generate_otp(new_user.mobile_number, email=new_user.email)
+    try:
+        generate_otp(new_user.email or new_user.mobile_number, email=new_user.email, require_delivery=True)
+    except RuntimeError:
+        return format_response(
+            success=False,
+            message="Unable to send verification email right now. Please try again later.",
+            status_code=503,
+            error={"code": "OTP_DELIVERY_FAILED"},
+        )
 
-    return format_response(data={"message": "OTP sent to your email."}, status_code=201)
+    return format_response(data={"message": "OTP sent to your email.", "email": new_user.email}, status_code=201)
 
 
 @auth_bp.route("/verify-otp", methods=["POST"])
@@ -85,8 +104,12 @@ def verify_otp_endpoint():
     except ValidationError as err:
         return format_response(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    if verify_otp(data["mobile_number"], data["otp"]):
-        user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
+    identifier = (data.get("email") or data.get("mobile_number") or "").strip().lower()
+    if verify_otp(identifier, data["otp"]):
+        if data.get("email"):
+            user = db.session.query(User).filter(func.lower(User.email) == identifier).first()
+        else:
+            user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
         if user:
             user.is_active = True
             db.session.commit()
@@ -118,24 +141,42 @@ def verify_otp_endpoint():
 def resend_otp():
     try:
         data = request.json or {}
-        contact = data.get("contact") or data.get("mobile_number")
-        purpose = data.get("purpose", "registration")
+        contact = data.get("email") or data.get("contact") or data.get("mobile_number")
+        _purpose = data.get("purpose", "registration")
 
         if not contact:
             return format_response(
-                success=False, message="Contact number is required", status_code=422, error={"code": "CONTACT_REQUIRED"}
+                success=False, message="Email is required", status_code=422, error={"code": "EMAIL_REQUIRED"}
             )
 
-        user = db.session.query(User).filter_by(mobile_number=contact).first()
+        normalized_contact = contact.strip().lower()
+        if "@" in normalized_contact:
+            user = db.session.query(User).filter(func.lower(User.email) == normalized_contact).first()
+        else:
+            user = db.session.query(User).filter_by(mobile_number=normalized_contact).first()
         if not user:
             return format_response(
                 success=False, message="User not found", status_code=404, error={"code": "USER_NOT_FOUND"}
             )
 
-        generate_otp(user.mobile_number, email=user.email)
+        try:
+            generate_otp(user.email or user.mobile_number, email=user.email, require_delivery=True)
+        except RuntimeError:
+            return format_response(
+                success=False,
+                message="Unable to send verification email right now. Please try again later.",
+                status_code=503,
+                error={"code": "OTP_DELIVERY_FAILED"},
+            )
 
         return format_response(
-            data={"message": "OTP sent successfully", "contact": contact, "otp_ttl": 120, "resend_after": 45}
+            data={
+                "message": "OTP sent successfully",
+                "email": user.email,
+                "contact": user.email or contact,
+                "otp_ttl": 120,
+                "resend_after": 45,
+            }
         )
     except Exception as e:
         return format_response(
@@ -151,13 +192,46 @@ def login():
     except ValidationError as err:
         return format_response(success=False, message="Validation error", status_code=422, error=err.messages)
 
-    user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
-    if not user or not user.password_hash:
+    email = (data.get("email") or "").strip().lower()
+    mobile_number = data.get("mobile_number")
+    password = data.get("password")
+
+    if email:
+        user = db.session.query(User).filter(func.lower(User.email) == email).first()
+        if not user:
+            return format_response(
+                success=False,
+                message="No account found for that email",
+                status_code=404,
+                error={"code": "USER_NOT_FOUND"},
+            )
+
+        try:
+            generate_otp(user.email or email, email=user.email or email, require_delivery=True)
+        except RuntimeError:
+            return format_response(
+                success=False,
+                message="Unable to send verification email right now. Please try again later.",
+                status_code=503,
+                error={"code": "OTP_DELIVERY_FAILED"},
+            )
+
+        return format_response(
+            data={
+                "message": "OTP sent to your email.",
+                "email": user.email,
+                "otp_ttl": current_app.config.get("OTP_TTL_SECONDS", 120),
+                "resend_after": current_app.config.get("OTP_RESEND_COOLDOWN_SECONDS", 45),
+            }
+        )
+
+    user = db.session.query(User).filter_by(mobile_number=mobile_number).first() if mobile_number else None
+    if not user or not user.password_hash or not password:
         return format_response(
             success=False,
-            message="Invalid mobile number or password",
-            status_code=401,
-            error={"code": "INVALID_CREDENTIALS"},
+            message="Email is required for OTP login",
+            status_code=422,
+            error={"code": "EMAIL_REQUIRED"},
         )
 
     # Check account lock
@@ -169,7 +243,7 @@ def login():
             error={"code": "ACCOUNT_LOCKED"},
         )
 
-    if not bcrypt.checkpw(data["password"].encode("utf-8"), user.password_hash.encode("utf-8")):
+    if not bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
         if user.failed_login_attempts >= 5:
             from datetime import timedelta as _td
@@ -368,7 +442,10 @@ def forgot_password():
     except ValidationError as err:
         return format_response(success=False, message="Validation error", error=err.messages, status_code=422)
 
-    user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
+    if data.get("email"):
+        user = db.session.query(User).filter(func.lower(User.email) == data["email"].strip().lower()).first()
+    else:
+        user = db.session.query(User).filter_by(mobile_number=data["mobile_number"]).first()
     if user:
         token = generate_reset_token(user.user_id, email=user.email)
 

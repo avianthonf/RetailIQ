@@ -118,43 +118,55 @@ def decode_access_token(token: str) -> dict | None:
 # ── OTP ───────────────────────────────────────────────────────────────────────
 
 
-def _otp_redis_key(mobile_number: str) -> str:
-    return f"otp:{mobile_number}"
+def _normalize_identifier(identifier: str) -> str:
+    value = (identifier or "").strip()
+    if "@" in value:
+        return value.lower()
+    return value
 
 
-def generate_otp(mobile_number: str, email: str | None = None) -> str:
+def _otp_redis_key(identifier: str) -> str:
+    return f"otp:{_normalize_identifier(identifier)}"
+
+
+def generate_otp(identifier: str, email: str | None = None, require_delivery: bool = False) -> str:
     """Generate a 6-digit OTP, store in Redis, and optionally email it."""
     otp = "".join(random.choices(string.digits, k=6))
     ttl = current_app.config.get("OTP_TTL_SECONDS", 120)
+    otp_identifier = _normalize_identifier(email or identifier)
 
     try:
         redis = get_redis_client()
-        redis.setex(_otp_redis_key(mobile_number), ttl, otp)
+        redis.setex(_otp_redis_key(otp_identifier), ttl, otp)
     except Exception as exc:
         logger.warning("Redis unavailable; OTP not stored: %s", exc)
         # In dev mode, log OTP to console so developers can still test
-        logger.info("[DEV] OTP for %s: %s", mobile_number, otp)
+        logger.info("[DEV] OTP for %s: %s", otp_identifier, otp)
 
+    delivery_ok = True
     if email:
         from ..email import send_otp_email
 
-        send_otp_email(email, otp)
+        delivery_ok = send_otp_email(email, otp)
     else:
         # Always log OTP in non-production environments for testing
         env = current_app.config.get("ENVIRONMENT", "development")
         if env != "production":
-            logger.info("[DEV] OTP for %s (email: %s): %s", mobile_number, email, otp)
+            logger.info("[DEV] OTP for %s (email: %s): %s", identifier, email, otp)
+
+    if email and require_delivery and not delivery_ok:
+        raise RuntimeError("OTP email delivery failed")
 
     return otp
 
 
-def verify_otp(mobile_number: str, otp: str) -> bool:
+def verify_otp(identifier: str, otp: str) -> bool:
     """Verify OTP against Redis store. Returns True if valid."""
     try:
         redis = get_redis_client()
-        stored = redis.get(_otp_redis_key(mobile_number))
+        stored = redis.get(_otp_redis_key(identifier))
         if stored and stored == otp:
-            redis.delete(_otp_redis_key(mobile_number))
+            redis.delete(_otp_redis_key(identifier))
             return True
         return False
     except Exception as exc:

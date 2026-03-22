@@ -182,11 +182,51 @@ def test_registration_sends_otp_email(client, app, monkeypatch):
     assert resp.status_code == 201
 
     # Verify OTP was stored in Redis
-    otp = fake.get("otp:9444444444")
+    otp = fake.get("otp:emailotp@example.com")
     assert otp is not None
 
     # Verify email was dispatched
     assert captured["to_email"] == "emailotp@example.com"
+    assert captured["otp_code"] == otp
+
+
+def test_login_sends_otp_email(client, app, monkeypatch):
+    """Login by email should trigger an OTP email."""
+    fake = FakeRedis()
+    monkeypatch.setattr("app.auth.utils.get_redis_client", lambda: fake)
+    monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: fake)
+
+    captured = {}
+
+    def mock_send_otp(to_email, otp_code):
+        captured["to_email"] = to_email
+        captured["otp_code"] = otp_code
+        return True
+
+    monkeypatch.setattr("app.email.send_otp_email", mock_send_otp)
+
+    with app.app_context():
+        store = Store(store_name="Login Store", store_type="grocery")
+        db.session.add(store)
+        db.session.flush()
+
+        user = User(
+            mobile_number="9555555556",
+            full_name="Login User",
+            email="login@example.com",
+            role="owner",
+            store_id=store.store_id,
+            is_active=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+    resp = client.post("/api/v1/auth/login", json={"email": "login@example.com"})
+    assert resp.status_code == 200
+
+    otp = fake.get("otp:login@example.com")
+    assert otp is not None
+    assert captured["to_email"] == "login@example.com"
     assert captured["otp_code"] == otp
 
 

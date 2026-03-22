@@ -122,16 +122,13 @@ def test_login_rate_limit(rl_client, rate_limit_app, monkeypatch):
     monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: mock_redis)
 
     with rate_limit_app.app_context():
-        import bcrypt
-
-        pw = bcrypt.hashpw(b"test123", bcrypt.gensalt(4)).decode()
         s = Store(store_name="RateLimitStore", store_type="grocery")
         _db.session.add(s)
         _db.session.commit()
         u = User(
             mobile_number="9999900000",
-            password_hash=pw,
             full_name="RL User",
+            email="rate.limit@example.com",
             role="owner",
             store_id=s.store_id,
             is_active=True,
@@ -139,7 +136,7 @@ def test_login_rate_limit(rl_client, rate_limit_app, monkeypatch):
         _db.session.add(u)
         _db.session.commit()
 
-    payload = {"mobile_number": "9999900000", "password": "test123"}
+    payload = {"email": "rate.limit@example.com"}
     last_status = None
     for _i in range(11):
         resp = rl_client.post("/api/v1/auth/login", json=payload)
@@ -288,9 +285,58 @@ def test_production_refuses_default_db_credentials(monkeypatch):
                     "ENVIRONMENT": "production",
                     "SECRET_KEY": "STRONG_SECRET_FOR_PROD_TEST_1234567890!",
                     "SQLALCHEMY_DATABASE_URI": "postgresql://retailiq:retailiq@localhost:5432/retailiq",
+                    "EMAIL_ENABLED": True,
+                    "SMTP_USER": "test@example.com",
+                    "SMTP_PASSWORD": "password",
                 }
             )
         assert "default dev credentials" in str(exc_info.value)
+
+
+def test_production_refuses_email_disabled(monkeypatch):
+    """Production mode must raise RuntimeError if email delivery is disabled."""
+    with monkeypatch.context() as m:
+        m.setenv("FLASK_ENV", "production")
+        m.setenv("ENVIRONMENT", "production")
+        m.setenv("SECRET_KEY", "STRONG_SECRET_FOR_PROD_TEST_1234567890!")
+        m.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/retailiq")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            create_app(
+                {
+                    "TESTING": False,
+                    "ENVIRONMENT": "production",
+                    "SECRET_KEY": "STRONG_SECRET_FOR_PROD_TEST_1234567890!",
+                    "SQLALCHEMY_DATABASE_URI": "postgresql://user:pass@localhost:5432/retailiq",
+                    "EMAIL_ENABLED": False,
+                    "SMTP_USER": "test@example.com",
+                    "SMTP_PASSWORD": "password",
+                }
+            )
+        assert "EMAIL_ENABLED" in str(exc_info.value)
+
+
+def test_production_refuses_missing_smtp_credentials(monkeypatch):
+    """Production mode must raise RuntimeError if SMTP credentials are missing."""
+    with monkeypatch.context() as m:
+        m.setenv("FLASK_ENV", "production")
+        m.setenv("ENVIRONMENT", "production")
+        m.setenv("SECRET_KEY", "STRONG_SECRET_FOR_PROD_TEST_1234567890!")
+        m.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/retailiq")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            create_app(
+                {
+                    "TESTING": False,
+                    "ENVIRONMENT": "production",
+                    "SECRET_KEY": "STRONG_SECRET_FOR_PROD_TEST_1234567890!",
+                    "SQLALCHEMY_DATABASE_URI": "postgresql://user:pass@localhost:5432/retailiq",
+                    "EMAIL_ENABLED": True,
+                    "SMTP_USER": "",
+                    "SMTP_PASSWORD": "",
+                }
+            )
+        assert "SMTP_USER and SMTP_PASSWORD" in str(exc_info.value)
 
 
 def test_development_mode_starts_with_defaults(monkeypatch):

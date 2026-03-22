@@ -1,5 +1,3 @@
-import bcrypt
-
 from app import db
 from app.models import Store, User
 
@@ -32,10 +30,9 @@ def test_refresh_token_rotation_and_logout(client, app, monkeypatch):
         db.session.add(store)
         db.session.flush()
 
-        password_hash = bcrypt.hashpw(b"secret123", bcrypt.gensalt(12)).decode("utf-8")
         user = User(
             mobile_number="9111111111",
-            password_hash=password_hash,
+            email="auth@example.com",
             full_name="Auth User",
             role="owner",
             store_id=store.store_id,
@@ -46,10 +43,19 @@ def test_refresh_token_rotation_and_logout(client, app, monkeypatch):
 
     login_resp = client.post(
         "/api/v1/auth/login",
-        json={"mobile_number": "9111111111", "password": "secret123"},
+        json={"email": "auth@example.com"},
     )
     assert login_resp.status_code == 200
     login_data = login_resp.get_json()["data"]
+    otp = fake.get("otp:auth@example.com")
+    assert otp is not None
+
+    verify_resp = client.post(
+        "/api/v1/auth/verify-otp",
+        json={"email": "auth@example.com", "otp": otp},
+    )
+    assert verify_resp.status_code == 200
+    login_data = verify_resp.get_json()["data"]
 
     refresh_token = login_data["refresh_token"]
     assert fake.get(f"refresh_token:{refresh_token}") is not None
@@ -95,14 +101,14 @@ def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
     assert register_resp.status_code == 201
 
     # Grab the OTP from the fake redis
-    otp = fake.get("otp:9222222222")
+    otp = fake.get("otp:otp_test@example.com")
     assert otp is not None
 
     # 2. Verify OTP
     verify_resp = client.post(
         "/api/v1/auth/verify-otp",
         json={
-            "mobile_number": "9222222222",
+            "email": "otp_test@example.com",
             "otp": otp,
         },
     )
