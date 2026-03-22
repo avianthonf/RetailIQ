@@ -19,7 +19,7 @@
 9. [AI Recommendations](#8-ai-recommendations)
 10. [Natural Language Query](#9-natural-language-query)
 11. [System](#10-system)
-12. [Developer Platform (OAuth 2.0)](#11-developer-platform-oauth-20)
+12. [Developer Platform](#11-developer-platform)
 13. [Webhooks](#12-webhooks)
 14. [Error Codes Reference](#error-codes-reference)
 
@@ -1353,42 +1353,39 @@ Simple ping endpoint (no auth required).
 
 ---
 
-## 11. Developer Platform (OAuth 2.0)
+## 11. Developer Platform
 
-**Prefix**: `/oauth`
+**Prefix**: `/api/v1/developer`
 
-RetailIQ supports OAuth 2.0 for third-party integrations.
+Developer integrations are API-key and webhook based.
 
-### POST `/oauth/token`
+### POST `/api/v1/developer/register`
 
-Exchange client credentials or authorization codes for access tokens.
+Register a developer profile.
 
-**Grant Types**: `client_credentials`, `authorization_code`, `refresh_token`.
+### GET `/api/v1/developer/apps`
 
-**Body (Client Credentials)**:
-```json
-{
-  "grant_type": "client_credentials",
-  "client_id": "your_client_id",
-  "client_secret": "your_client_secret"
-}
-```
+List developer applications for the current user.
 
-**Response**:
-```json
-{
-  "access_token": "eyJ...",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "refresh_token": "...",
-  "scope": "read write"
-}
-```
+### POST `/api/v1/developer/apps`
 
-### GET `/api/v2/inventory`
-🔒 **OAuth Scope: `read`**
-Version 2 of the inventory API, specifically designed for third-party consumption.
-Requires `store_id` query parameter.
+Create an API-key style developer application.
+
+### GET `/api/v1/developer/marketplace`
+
+Browse approved marketplace applications.
+
+### GET `/api/v1/developer/usage`
+
+Inspect aggregated usage statistics for the current developer applications.
+
+### GET `/api/v1/developer/rate-limits`
+
+Inspect current request budgets for each application.
+
+### GET `/api/v1/developer/logs`
+
+Inspect recent API and webhook delivery logs.
 
 ---
 

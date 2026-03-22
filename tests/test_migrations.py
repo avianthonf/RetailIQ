@@ -63,7 +63,6 @@ class TestReconcileMigrationTypes:
             ("insurance_products", "description"),
             ("country_tax_configs", "compliance_notes"),
             ("merchant_kyc", "notes"),
-            ("payment_records", "error_message"),
             ("kyc_records", "rejection_reason"),
             ("e_invoices", "xml_payload"),
             ("e_invoices", "qr_code_data"),
@@ -79,9 +78,9 @@ class TestReconcileMigrationTypes:
         # Find the create_table block for this table and verify the column
         # uses sa.Text() — a simple check that the column name appears near sa.Text()
         pattern = rf'"{column}".*?sa\.Text\(\)'
-        assert re.search(pattern, content, re.DOTALL), (
-            f"Column '{table}.{column}' should use sa.Text() in reconcile migration"
-        )
+        assert re.search(
+            pattern, content, re.DOTALL
+        ), f"Column '{table}.{column}' should use sa.Text() in reconcile migration"
 
 
 # ===========================================================================
@@ -222,7 +221,6 @@ class TestModelColumnTypes:
             ("InsuranceProduct", "description", sa.Text),
             ("CountryTaxConfig", "compliance_notes", sa.Text),
             ("MerchantKYC", "notes", sa.Text),
-            ("PaymentRecord", "error_message", sa.Text),
             ("KYCRecord", "rejection_reason", sa.Text),
             ("EInvoice", "xml_payload", sa.Text),
             ("EInvoice", "qr_code_data", sa.Text),
@@ -241,9 +239,9 @@ class TestModelColumnTypes:
                 break
         assert model is not None, f"Model '{model_name}' not found in registry"
         col = model.__table__.columns[column_name]
-        assert isinstance(col.type, expected_type), (
-            f"{model_name}.{column_name} should be {expected_type.__name__}, got {type(col.type).__name__}"
-        )
+        assert isinstance(
+            col.type, expected_type
+        ), f"{model_name}.{column_name} should be {expected_type.__name__}, got {type(col.type).__name__}"
 
     @pytest.mark.parametrize(
         "model_name,column_name",
@@ -265,9 +263,9 @@ class TestModelColumnTypes:
                 break
         assert model is not None, f"Model '{model_name}' not found in registry"
         col = model.__table__.columns[column_name]
-        assert isinstance(col.type, sa.DateTime), (
-            f"{model_name}.{column_name} should be DateTime, got {type(col.type).__name__}"
-        )
+        assert isinstance(
+            col.type, sa.DateTime
+        ), f"{model_name}.{column_name} should be DateTime, got {type(col.type).__name__}"
 
 
 # ===========================================================================
@@ -304,9 +302,9 @@ class TestAlembicCheck:
             text=True,
             timeout=120,
         )
-        assert result.returncode == 0, (
-            f"alembic check detected drift:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"alembic check detected drift:\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert "No new upgrade operations detected" in (result.stdout + result.stderr)
 
 

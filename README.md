@@ -22,7 +22,7 @@ The canonical parity artifacts live in the workspace folder:
 
 ## Runtime Notes
 
-- Auth is split between merchant/staff JWT flows under `/api/v1/*` and developer OAuth flows under `/oauth` and `/api/v2/*`
+- Auth uses merchant/staff JWT flows under `/api/v1/*`
 - Dashboard collections use named-key envelopes
 - The backend is task-driven for async work such as OCR, analytics snapshots, forecasting, and notifications
 - The deployed backend URL is the production integration target for the frontend

@@ -15,7 +15,6 @@ from app.models.finance_models import (
     LoanProduct,
     MerchantCreditProfile,
     MerchantKYC,
-    PaymentTransaction,
     TreasuryConfig,
     TreasuryTransaction,
 )
@@ -25,8 +24,7 @@ from . import finance_bp
 from .credit_scoring import calculate_merchant_score
 from .insurance_engine import enroll_merchant, trigger_parametric_claim
 from .ledger import get_account_balance, record_transaction
-from .loan_engine import apply_for_loan, approve_loan, disburse_loan, record_repayment
-from .payment_processor import process_merchant_payment
+from .loan_engine import apply_for_loan, approve_loan, disburse_loan
 from .treasury_manager import accrue_yield, perform_sweep, set_sweep_config
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -218,27 +216,6 @@ def disburse_loan_route(loan_id):
 # ────────────────────────────────────────────────────────────────────────────
 # PAYMENTS
 # ────────────────────────────────────────────────────────────────────────────
-
-
-@finance_bp.route("/payments/process", methods=["POST"])
-@require_auth
-def process_payment():
-    """Process a payment."""
-    data = request.get_json()
-    payment = process_merchant_payment(
-        store_id=g.current_user["store_id"],
-        amount=Decimal(str(data["amount"])),
-        payment_method=data.get("payment_method", "CARD"),
-    )
-    db.session.commit()
-    return jsonify(
-        {
-            "payment_id": payment.id,
-            "status": payment.status,
-            "net_amount": float(payment.amount - payment.fees),
-            "fees": float(payment.fees),
-        }
-    ), 200
 
 
 # ────────────────────────────────────────────────────────────────────────────

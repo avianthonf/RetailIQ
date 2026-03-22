@@ -595,35 +595,6 @@ def upgrade() -> None:
             sa.Column("is_active", sa.Boolean(), nullable=False),
         )
 
-    if not insp.has_table("payment_providers"):
-        op.create_table(
-            "payment_providers",
-            sa.Column("id", sa.Integer(), primary_key=True, nullable=False, autoincrement=True),
-            sa.Column("code", sa.String(length=32), nullable=False, unique=True),
-            sa.Column("name", sa.String(length=128), nullable=False),
-            sa.Column("country_code", sa.String(length=2), sa.ForeignKey("countries.code"), nullable=False),
-            sa.Column("provider_type", sa.String(length=32), nullable=False),
-            sa.Column(
-                "supported_methods",
-                postgresql.JSONB(),
-            ),
-            sa.Column("settlement_currency", sa.String(length=3), nullable=False),
-            sa.Column(
-                "api_version",
-                sa.String(length=16),
-            ),
-            sa.Column(
-                "webhook_url",
-                sa.String(length=512),
-            ),
-            sa.Column("is_active", sa.Boolean(), nullable=False),
-            sa.Column(
-                "config",
-                postgresql.JSONB(),
-            ),
-            sa.UniqueConstraint("code", name=None),
-        )
-
     if not insp.has_table("kyc_providers"):
         op.create_table(
             "kyc_providers",
@@ -977,68 +948,6 @@ def upgrade() -> None:
                 sa.Integer(),
             ),
             sa.Column("created_at", sa.TIMESTAMP(), nullable=False),
-        )
-
-    if not insp.has_table("payment_records"):
-        op.create_table(
-            "payment_records",
-            sa.Column("id", sa.UUID(), primary_key=True, nullable=False),
-            sa.Column("transaction_id", sa.UUID(), sa.ForeignKey("transactions.transaction_id")),
-            sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.store_id"), nullable=False),
-            sa.Column("provider_id", sa.Integer(), sa.ForeignKey("payment_providers.id"), nullable=False),
-            sa.Column("payment_method", sa.String(length=32), nullable=False),
-            sa.Column("amount", sa.Numeric(precision=14, scale=2), nullable=False),
-            sa.Column("currency_code", sa.String(length=3), nullable=False),
-            sa.Column(
-                "provider_ref_id",
-                sa.String(length=128),
-            ),
-            sa.Column("status", sa.String(length=16), nullable=False),
-            sa.Column(
-                "error_code",
-                sa.String(length=64),
-            ),
-            sa.Column(
-                "error_message",
-                sa.Text(),
-            ),
-            sa.Column(
-                "metadata_json",
-                postgresql.JSONB(),
-            ),
-            sa.Column(
-                "created_at",
-                sa.TIMESTAMP(),
-            ),
-            sa.Column(
-                "completed_at",
-                sa.TIMESTAMP(),
-            ),
-        )
-    op.create_index("idx_payment_records_store_status", "payment_records", ["store_id", "status"], unique=False)
-    op.create_index("idx_payment_records_provider_ref", "payment_records", ["provider_ref_id"], unique=False)
-
-    if not insp.has_table("store_payment_methods"):
-        op.create_table(
-            "store_payment_methods",
-            sa.Column("id", sa.UUID(), primary_key=True, nullable=False),
-            sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.store_id"), nullable=False),
-            sa.Column("provider_id", sa.Integer(), sa.ForeignKey("payment_providers.id"), nullable=False),
-            sa.Column(
-                "merchant_account_id",
-                sa.String(length=128),
-            ),
-            sa.Column("is_enabled", sa.Boolean(), nullable=False),
-            sa.Column("onboarding_status", sa.String(length=16), nullable=False),
-            sa.Column(
-                "credentials_encrypted",
-                postgresql.JSONB(),
-            ),
-            sa.Column(
-                "created_at",
-                sa.TIMESTAMP(),
-            ),
-            sa.UniqueConstraint("store_id", "provider_id", name="uq_store_payment_provider"),
         )
 
     if not insp.has_table("kyc_records"):
@@ -1427,10 +1336,6 @@ def downgrade() -> None:
         op.drop_table("e_invoices")
     if insp.has_table("kyc_records"):
         op.drop_table("kyc_records")
-    if insp.has_table("store_payment_methods"):
-        op.drop_table("store_payment_methods")
-    if insp.has_table("payment_records"):
-        op.drop_table("payment_records")
     if insp.has_table("treasury_transactions"):
         op.drop_table("treasury_transactions")
     if insp.has_table("treasury_configs"):
@@ -1461,8 +1366,6 @@ def downgrade() -> None:
         op.drop_table("country_tax_configs")
     if insp.has_table("kyc_providers"):
         op.drop_table("kyc_providers")
-    if insp.has_table("payment_providers"):
-        op.drop_table("payment_providers")
     if insp.has_table("insurance_products"):
         op.drop_table("insurance_products")
     if insp.has_table("loan_products"):

@@ -28,9 +28,7 @@ def _register_blueprints(app: Flask):
     # ── Imports ────────────────────────────────────────────────────────────
     from app.ai_v2 import ai_v2_bp
     from app.analytics import analytics_bp
-    from app.api_v2 import api_v2_bp
     from app.auth import auth_bp
-    from app.auth.oauth_routes import oauth_bp
     from app.chain import chain_bp
     from app.customers import customers_bp
     from app.dashboard import dashboard_bp
@@ -50,7 +48,6 @@ def _register_blueprints(app: Flask):
     from app.nlp import nlp_bp
     from app.offline import offline_bp
     from app.ops import ops_bp
-    from app.payments import payments_bp
     from app.pricing import pricing_bp
     from app.receipts import barcode_bp, receipts_bp
     from app.staff_performance import staff_performance_bp
@@ -88,10 +85,8 @@ def _register_blueprints(app: Flask):
     app.register_blueprint(market_intelligence_bp, url_prefix=f"{prefix}/market")
     app.register_blueprint(marketplace_bp, url_prefix=f"{prefix}/marketplace")
     app.register_blueprint(nlp_bp, url_prefix=f"{prefix}/nlp")
-    app.register_blueprint(oauth_bp, url_prefix="/oauth")
     app.register_blueprint(offline_bp, url_prefix=f"{prefix}/offline")
     app.register_blueprint(ops_bp, url_prefix=f"{prefix}/ops")
-    app.register_blueprint(payments_bp, url_prefix=f"{prefix}/payments")
     app.register_blueprint(po_bp, url_prefix=f"{prefix}/purchase-orders")
     app.register_blueprint(pricing_bp, url_prefix=f"{prefix}/pricing")
     app.register_blueprint(receipts_bp, url_prefix=f"{prefix}/receipts")
@@ -105,7 +100,6 @@ def _register_blueprints(app: Flask):
     app.register_blueprint(whatsapp_bp, url_prefix=f"{prefix}/whatsapp")
 
     # ── V2 / Other API Registrations ──────────────────────────────────────
-    app.register_blueprint(api_v2_bp, url_prefix="/api/v2")
 
 
 def _register_error_handlers(app: Flask):

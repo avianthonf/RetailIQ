@@ -166,16 +166,6 @@ def test_loan_lifecycle(app, client, owner_headers, seeded_finance):
     assert resp.json["total_debt"] == 5000.00
 
 
-def test_payment_processing(client, owner_headers):
-    """Test card payment processing and fee deduction."""
-    resp = client.post(
-        "/api/v2/finance/payments/process", json={"amount": 1000.00, "payment_method": "UPI"}, headers=owner_headers
-    )
-    assert resp.status_code == 200
-    assert resp.json["net_amount"] == 1000.00 - (1000.00 * 0.029 + 0.30)
-    assert resp.json["fees"] == (1000.00 * 0.029 + 0.30)
-
-
 def test_treasury_sweeps(app, client, owner_headers, test_store):
     """Test automated treasury sweeps."""
     # 1. Set config
