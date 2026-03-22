@@ -97,12 +97,18 @@ def test_einvoice_adapters_submission():
     assert "faktur_pajak_no" in id_resp
 
 
-def test_base_einvoice_adapter_not_implemented():
+def test_base_einvoice_adapter_contract():
     adapter = BaseEInvoiceAdapter(country_code="XX", store_id=1)
-    with pytest.raises(NotImplementedError):
-        adapter.generate_invoice(None)
-    with pytest.raises(NotImplementedError):
-        adapter.submit_invoice({})
+    txn = type("Txn", (), {"transaction_id": uuid.uuid4(), "total_amount": 99.5})()
+    payload = adapter.generate_invoice(txn)
+    assert payload["format"] == "STANDARD"
+    assert payload["invoice_number"].startswith("INV-")
+    assert payload["transaction_id"] == str(txn.transaction_id)
+
+    response = adapter.submit_invoice(payload)
+    assert response["status"] == "ACCEPTED"
+    assert response["authority_ref"] == payload["invoice_number"]
+    assert response["qr_code_url"].startswith("data:image/svg+xml;base64,")
 
 
 def test_generate_einvoice_route_success(client, owner_headers, test_transaction):
@@ -118,6 +124,7 @@ def test_generate_einvoice_route_success(client, owner_headers, test_transaction
     data = response.get_json()["data"]
     assert data["status"] == "ACCEPTED"
     assert "invoice_id" in data
+    assert data["invoice_number"] is not None
     assert "qr_code_url" in data
 
     einvoice = db.session.query(EInvoice).first()
@@ -145,6 +152,7 @@ def test_generate_einvoice_route_existing(client, owner_headers, test_transactio
     data2 = response2.get_json()["data"]
 
     # Existing one doesn't return invoice_id, it returns invoice_number in the early exit block
+    assert "invoice_id" in data2
     assert "invoice_number" in data2
 
 
@@ -204,8 +212,10 @@ def test_get_einvoice_status_success(client, owner_headers, test_transaction, te
     response = client.get(f"/api/v2/einvoice/status/{einvoice.id}", headers=owner_headers)
     assert response.status_code == 200
     data = response.get_json()["data"]
+    assert data["invoice_id"] == str(einvoice.id)
     assert data["status"] == "ACCEPTED"
     assert data["invoice_number"] == "ABCDEFG"
+    assert data["qr_code_url"] is not None
 
 
 def test_get_einvoice_status_not_found(client, owner_headers):

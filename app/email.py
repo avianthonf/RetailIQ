@@ -3,8 +3,8 @@ RetailIQ Email Service
 ======================
 Sends transactional emails (OTPs, password resets) via Gmail SMTP.
 
-Falls back to console logging when MAIL_USERNAME / MAIL_PASSWORD are not
-configured (local development).
+Falls back to console logging when SMTP_USER / SMTP_PASSWORD are not
+configured. Legacy MAIL_USERNAME / MAIL_PASSWORD aliases are also accepted.
 """
 
 import logging
@@ -20,10 +20,11 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
 
-def _get_mail_config():
+def _get_mail_config(config=None):
     """Return (username, password) or (None, None) if not configured."""
-    username = current_app.config.get("SMTP_USER") or ""
-    password = current_app.config.get("SMTP_PASSWORD") or ""
+    config = config or current_app.config
+    username = config.get("SMTP_USER") or config.get("MAIL_USERNAME") or ""
+    password = config.get("SMTP_PASSWORD") or config.get("MAIL_PASSWORD") or ""
     if username and password:
         return username, password
     return None, None
@@ -35,10 +36,20 @@ def _send_raw(to_email, subject, html_body):
     In dev mode (no credentials) the email is printed to the console instead.
     """
     username, password = _get_mail_config()
+    email_enabled = bool(current_app.config.get("EMAIL_ENABLED"))
 
-    if not username or not current_app.config.get("EMAIL_ENABLED"):
+    if not username or not password:
         if current_app.config.get("ENVIRONMENT") == "production":
             logger.error("[DISABLED-EMAIL] Production email delivery is not configured for %s", to_email)
+            return False
+        # Dev fallback or disabled
+        logger.info("[DEV/DISABLED-EMAIL] To: %s | Subject: %s", to_email, subject)
+        logger.info("[DEV/DISABLED-EMAIL] Body:\n%s", html_body)
+        return True
+
+    if not email_enabled:
+        if current_app.config.get("ENVIRONMENT") == "production":
+            logger.error("[DISABLED-EMAIL] Production email delivery is disabled for %s", to_email)
             return False
         # Dev fallback or disabled
         logger.info("[DEV/DISABLED-EMAIL] To: %s | Subject: %s", to_email, subject)
@@ -63,6 +74,12 @@ def _send_raw(to_email, subject, html_body):
             server.sendmail(username, to_email, msg.as_string())
         logger.info("Email sent to %s [%s]", to_email, subject)
         return True
+    except smtplib.SMTPAuthenticationError:
+        logger.exception("SMTP authentication failed when sending email to %s; check provider credentials", to_email)
+        return False
+    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError):
+        logger.exception("SMTP transport failed when sending email to %s; check mail server availability", to_email)
+        return False
     except Exception:
         logger.exception("Failed to send email to %s", to_email)
         return False

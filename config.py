@@ -8,6 +8,14 @@ import os
 from datetime import timedelta
 
 
+def _first_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 class Config:
     # ── Flask Core ────────────────────────────────────────────────────────────
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
@@ -46,10 +54,17 @@ class Config:
     # ── Email ─────────────────────────────────────────────────────────────────
     SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
     SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-    SMTP_USER = os.environ.get("SMTP_USER", "")
-    SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
+    SMTP_USER = _first_env("SMTP_USER", "MAIL_USERNAME")
+    SMTP_PASSWORD = _first_env("SMTP_PASSWORD", "MAIL_PASSWORD")
     SMTP_FROM = os.environ.get("SMTP_FROM", "noreply@retailiq.com")
-    EMAIL_ENABLED = os.environ.get("EMAIL_ENABLED", "false").lower() == "true"
+    EMAIL_ENABLED = os.environ.get(
+        "EMAIL_ENABLED",
+        "true"
+        if _first_env("ENVIRONMENT", "FLASK_ENV", default="development").lower() == "production"
+        and SMTP_USER
+        and SMTP_PASSWORD
+        else "false",
+    ).lower() == "true"
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
@@ -62,7 +77,7 @@ class Config:
     # ── App Metadata ──────────────────────────────────────────────────────────
     APP_NAME = "RetailIQ"
     APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
-    ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+    ENVIRONMENT = _first_env("ENVIRONMENT", "FLASK_ENV", default="development").lower()
 
     # ── Railway / Cloud ───────────────────────────────────────────────────────
     PORT = int(os.environ.get("PORT", 5000))

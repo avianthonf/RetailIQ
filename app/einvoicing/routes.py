@@ -15,6 +15,24 @@ from . import einvoicing_bp
 from .engine import get_einvoice_adapter
 
 
+def _resolved_qr_code_url(invoice: EInvoice) -> str | None:
+    if invoice.qr_code_data:
+        return invoice.qr_code_data
+
+    try:
+        adapter = get_einvoice_adapter(invoice.country_code, invoice.store_id)
+        return adapter.build_qr_code_url(
+            {
+                "invoice_number": invoice.invoice_number,
+                "transaction_id": str(invoice.transaction_id),
+                "format": invoice.invoice_format,
+            },
+            invoice.authority_ref or invoice.invoice_number or str(invoice.id),
+        )
+    except Exception:
+        return None
+
+
 @einvoicing_bp.route("/generate", methods=["POST"])
 @require_auth
 def generate_einvoice():
@@ -22,7 +40,7 @@ def generate_einvoice():
     try:
         data = request.json
         transaction_id = data["transaction_id"]
-        country_code = data.get("country_code", "IN")
+        country_code = data.get("country_code", "IN").upper()
     except KeyError as e:
         return format_response(
             success=False, status_code=400, error={"code": "VALIDATION_ERROR", "message": f"Missing field {e}"}
@@ -49,9 +67,15 @@ def generate_einvoice():
         return format_response(
             True,
             data={
+                "invoice_id": str(existing.id),
+                "transaction_id": str(existing.transaction_id),
+                "country_code": existing.country_code,
                 "status": existing.status,
                 "invoice_number": existing.invoice_number,
-                "qr_code_data": existing.qr_code_data,
+                "authority_ref": existing.authority_ref,
+                "qr_code_url": _resolved_qr_code_url(existing),
+                "submitted_at": existing.submitted_at.isoformat() if existing.submitted_at else None,
+                "invoice_format": existing.invoice_format,
             },
         )
     try:
@@ -67,7 +91,11 @@ def generate_einvoice():
             country_code=country_code,
             invoice_format=payload.get("format", "STANDARD"),
             xml_payload=payload.get("xml_payload"),
-            invoice_number=payload.get("chave_acesso") or payload.get("uuid"),
+            invoice_number=payload.get("invoice_number")
+            or payload.get("chave_acesso")
+            or payload.get("irn")
+            or payload.get("uuid"),
+            digital_signature=payload.get("digital_signature"),
             status="DRAFT",
         )
         db.session.add(invoice)
@@ -78,7 +106,12 @@ def generate_einvoice():
 
         # Update record
         invoice.status = response.get("status", "SUBMITTED")
-        invoice.authority_ref = response.get("protocol") or response.get("sat_seal") or response.get("faktur_pajak_no")
+        invoice.authority_ref = (
+            response.get("authority_ref")
+            or response.get("protocol")
+            or response.get("sat_seal")
+            or response.get("faktur_pajak_no")
+        )
         invoice.qr_code_data = response.get("qr_code_url")
         invoice.submission_response = response
         invoice.submitted_at = datetime.now(timezone.utc)
@@ -88,10 +121,15 @@ def generate_einvoice():
         return format_response(
             True,
             data={
-                "status": invoice.status,
                 "invoice_id": str(invoice.id),
+                "transaction_id": str(invoice.transaction_id),
+                "country_code": invoice.country_code,
+                "status": invoice.status,
+                "invoice_number": invoice.invoice_number,
                 "authority_ref": invoice.authority_ref,
-                "qr_code_url": invoice.qr_code_data,
+                "qr_code_url": _resolved_qr_code_url(invoice),
+                "submitted_at": invoice.submitted_at.isoformat() if invoice.submitted_at else None,
+                "invoice_format": invoice.invoice_format,
             },
         )
     except ValueError as e:
@@ -121,13 +159,14 @@ def get_einvoice_status(invoice_id):
     return format_response(
         True,
         data={
+            "invoice_id": str(invoice.id),
             "transaction_id": str(invoice.transaction_id),
             "country_code": invoice.country_code,
-            "format": invoice.invoice_format,
+            "invoice_format": invoice.invoice_format,
             "invoice_number": invoice.invoice_number,
             "authority_ref": invoice.authority_ref,
             "status": invoice.status,
             "submitted_at": invoice.submitted_at.isoformat() if invoice.submitted_at else None,
-            "qr_code_data": invoice.qr_code_data,
+            "qr_code_url": _resolved_qr_code_url(invoice),
         },
     )

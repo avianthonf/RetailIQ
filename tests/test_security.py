@@ -339,6 +339,28 @@ def test_production_refuses_missing_smtp_credentials(monkeypatch):
         assert "SMTP_USER and SMTP_PASSWORD" in str(exc_info.value)
 
 
+def test_production_accepts_mail_aliases_for_email_credentials(monkeypatch):
+    """Production mode should accept legacy MAIL_* aliases for email config."""
+    with monkeypatch.context() as m:
+        m.setenv("FLASK_ENV", "production")
+        m.setenv("ENVIRONMENT", "production")
+        m.setenv("SECRET_KEY", "STRONG_SECRET_FOR_PROD_TEST_1234567890!")
+        m.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/retailiq")
+
+        app = create_app(
+            {
+                "TESTING": False,
+                "ENVIRONMENT": "production",
+                "SECRET_KEY": "STRONG_SECRET_FOR_PROD_TEST_1234567890!",
+                "SQLALCHEMY_DATABASE_URI": "postgresql://user:pass@localhost:5432/retailiq",
+                "EMAIL_ENABLED": True,
+                "MAIL_USERNAME": "alias@example.com",
+                "MAIL_PASSWORD": "password",
+            }
+        )
+
+        assert app.config.get("EMAIL_ENABLED") is True
+
 def test_development_mode_starts_with_defaults(monkeypatch):
     """Development mode must succeed with defaults."""
     with monkeypatch.context() as m:
