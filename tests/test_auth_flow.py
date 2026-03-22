@@ -136,3 +136,35 @@ def test_verify_otp_returns_auth_tokens(client, app, monkeypatch):
         json={"refresh_token": verify_data["refresh_token"]},
     )
     assert protected_resp.status_code == 200
+
+
+def test_register_rolls_back_when_otp_delivery_fails(client, app, monkeypatch):
+    fake = FakeRedis()
+
+    monkeypatch.setattr("app.auth.utils.get_redis_client", lambda: fake)
+    monkeypatch.setattr("app.auth.routes.get_redis_client", lambda: fake)
+    monkeypatch.setattr(
+        "app.auth.routes.generate_otp",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("OTP email delivery failed")),
+    )
+
+    resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Failed Delivery User",
+            "mobile_number": "9333333333",
+            "password": "secret123",
+            "store_name": "Failed Delivery Store",
+            "email": "failed_delivery@example.com",
+            "role": "staff",
+        },
+    )
+
+    assert resp.status_code == 503
+    payload = resp.get_json()
+    assert payload["error"]["code"] == "OTP_DELIVERY_FAILED"
+    assert "Registration was not completed" in payload["message"]
+
+    with app.app_context():
+        user = db.session.query(User).filter_by(mobile_number="9333333333").first()
+        assert user is None

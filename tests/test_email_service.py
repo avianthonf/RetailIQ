@@ -11,7 +11,8 @@ Covers:
   - Forgot-password triggers reset email
 """
 
-from unittest.mock import MagicMock, patch
+import smtplib
+from unittest.mock import MagicMock, call, patch
 
 import bcrypt
 
@@ -87,6 +88,28 @@ def test_send_otp_email_via_smtp(mock_smtp_class, app):
 
 
 @patch("app.email.smtplib.SMTP")
+def test_send_otp_email_normalizes_gmail_app_password_spacing(mock_smtp_class, app):
+    """Gmail app passwords copied with spaces should still authenticate."""
+    app.config["EMAIL_ENABLED"] = True
+    app.config["SMTP_USER"] = "test@gmail.com"
+    app.config["SMTP_PASSWORD"] = " abcd efgh ijkl mnop "
+
+    mock_server = MagicMock()
+    mock_smtp_class.return_value.__enter__ = MagicMock(return_value=mock_server)
+    mock_smtp_class.return_value.__exit__ = MagicMock(return_value=False)
+
+    with app.app_context():
+        from app.email import send_otp_email
+
+        result = send_otp_email("user@example.com", "333333")
+        assert result is True
+
+    mock_server.login.assert_called_once_with("test@gmail.com", "abcdefghijklmnop")
+    app.config["SMTP_USER"] = ""
+    app.config["SMTP_PASSWORD"] = ""
+
+
+@patch("app.email.smtplib.SMTP")
 def test_send_otp_email_accepts_mail_aliases(mock_smtp_class, app):
     """Legacy MAIL_USERNAME / MAIL_PASSWORD aliases should also work."""
     app.config["EMAIL_ENABLED"] = True
@@ -107,6 +130,41 @@ def test_send_otp_email_accepts_mail_aliases(mock_smtp_class, app):
     mock_server.login.assert_called_once_with("alias@gmail.com", "alias-password")
     mock_server.sendmail.assert_called_once()
 
+    app.config["MAIL_USERNAME"] = ""
+    app.config["MAIL_PASSWORD"] = ""
+
+
+@patch("app.email.smtplib.SMTP")
+def test_send_otp_email_falls_back_to_mail_aliases_on_auth_failure(mock_smtp_class, app):
+    """Fallback to MAIL aliases when the primary SMTP pair is stale."""
+    app.config["EMAIL_ENABLED"] = True
+    app.config["SMTP_USER"] = "stale@gmail.com"
+    app.config["SMTP_PASSWORD"] = "stale-password"
+    app.config["MAIL_USERNAME"] = "alias@gmail.com"
+    app.config["MAIL_PASSWORD"] = "alias-password"
+
+    mock_server = MagicMock()
+    mock_smtp_class.return_value.__enter__ = MagicMock(return_value=mock_server)
+    mock_smtp_class.return_value.__exit__ = MagicMock(return_value=False)
+    mock_server.login.side_effect = [
+        smtplib.SMTPAuthenticationError(534, b"bad credentials"),
+        None,
+    ]
+
+    with app.app_context():
+        from app.email import send_otp_email
+
+        result = send_otp_email("user@example.com", "246810")
+        assert result is True
+
+    assert mock_server.login.call_args_list == [
+        call("stale@gmail.com", "stale-password"),
+        call("alias@gmail.com", "alias-password"),
+    ]
+    mock_server.sendmail.assert_called_once()
+
+    app.config["SMTP_USER"] = ""
+    app.config["SMTP_PASSWORD"] = ""
     app.config["MAIL_USERNAME"] = ""
     app.config["MAIL_PASSWORD"] = ""
 

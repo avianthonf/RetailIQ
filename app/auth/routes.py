@@ -81,17 +81,18 @@ def register():
         db.session.flush()
         new_user.store_id = new_store.store_id
 
-    db.session.commit()
-
     try:
         generate_otp(new_user.email or new_user.mobile_number, email=new_user.email, require_delivery=True)
     except RuntimeError:
+        db.session.rollback()
         return format_response(
             success=False,
-            message="Unable to send verification email right now. Please try again later.",
+            message="Unable to send verification email right now. Registration was not completed. Please try again.",
             status_code=503,
             error={"code": "OTP_DELIVERY_FAILED"},
         )
+
+    db.session.commit()
 
     return format_response(data={"message": "OTP sent to your email.", "email": new_user.email}, status_code=201)
 

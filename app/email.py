@@ -20,12 +20,64 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
 
+def _normalize_mail_value(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_mail_password(value):
+    normalized = _normalize_mail_value(value)
+    collapsed = "".join(normalized.split())
+
+    # Gmail app passwords are shown in grouped chunks but SMTP expects a single
+    # 16-character token.
+    if normalized != collapsed and len(collapsed) == 16 and collapsed.isalnum():
+        return collapsed
+
+    return normalized
+
+
+def _get_mail_candidates(config=None):
+    """Return ordered credential candidates as (source, username, password)."""
+    config = config or current_app.config
+    smtp_username = _normalize_mail_value(config.get("SMTP_USER"))
+    smtp_password = _normalize_mail_password(config.get("SMTP_PASSWORD"))
+    mail_username = _normalize_mail_value(config.get("MAIL_USERNAME"))
+    mail_password = _normalize_mail_password(config.get("MAIL_PASSWORD"))
+
+    candidates = []
+    seen_pairs = set()
+
+    for source, username, password in (
+        ("SMTP_USER/SMTP_PASSWORD", smtp_username, smtp_password),
+        ("MAIL_USERNAME/MAIL_PASSWORD", mail_username, mail_password),
+    ):
+        if not username or not password:
+            continue
+
+        pair = (username, password)
+        if pair in seen_pairs:
+            continue
+
+        seen_pairs.add(pair)
+        candidates.append((source, username, password))
+
+    if len(candidates) == 2 and candidates[0][1:] != candidates[1][1:]:
+        logger.warning(
+            "Conflicting SMTP and MAIL credentials detected; trying %s first and %s as fallback",
+            candidates[0][0],
+            candidates[1][0],
+        )
+
+    return candidates
+
+
 def _get_mail_config(config=None):
     """Return (username, password) or (None, None) if not configured."""
-    config = config or current_app.config
-    username = config.get("SMTP_USER") or config.get("MAIL_USERNAME") or ""
-    password = config.get("SMTP_PASSWORD") or config.get("MAIL_PASSWORD") or ""
-    if username and password:
+    candidates = _get_mail_candidates(config)
+    if candidates:
+        _, username, password = candidates[0]
         return username, password
     return None, None
 
@@ -35,10 +87,10 @@ def _send_raw(to_email, subject, html_body):
     Send an email via Gmail SMTP.  Returns True on success, False on failure.
     In dev mode (no credentials) the email is printed to the console instead.
     """
-    username, password = _get_mail_config()
+    candidates = _get_mail_candidates()
     email_enabled = bool(current_app.config.get("EMAIL_ENABLED"))
 
-    if not username or not password:
+    if not candidates:
         if current_app.config.get("ENVIRONMENT") == "production":
             logger.error("[DISABLED-EMAIL] Production email delivery is not configured for %s", to_email)
             return False
@@ -56,33 +108,47 @@ def _send_raw(to_email, subject, html_body):
         logger.info("[DEV/DISABLED-EMAIL] Body:\n%s", html_body)
         return True
 
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"RetailIQ <{username}>"
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_body, "html"))
-
     host = current_app.config.get("SMTP_HOST", "smtp.gmail.com")
     port = int(current_app.config.get("SMTP_PORT", 587))
 
-    try:
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(username, password)
-            server.sendmail(username, to_email, msg.as_string())
-        logger.info("Email sent to %s [%s]", to_email, subject)
-        return True
-    except smtplib.SMTPAuthenticationError:
-        logger.exception("SMTP authentication failed when sending email to %s; check provider credentials", to_email)
-        return False
-    except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError):
-        logger.exception("SMTP transport failed when sending email to %s; check mail server availability", to_email)
-        return False
-    except Exception:
-        logger.exception("Failed to send email to %s", to_email)
-        return False
+    for index, (source, username, password) in enumerate(candidates):
+        msg = MIMEMultipart("alternative")
+        msg["From"] = f"RetailIQ <{username}>"
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html_body, "html"))
+
+        try:
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(username, password)
+                server.sendmail(username, to_email, msg.as_string())
+            logger.info("Email sent to %s [%s] using %s", to_email, subject, source)
+            return True
+        except smtplib.SMTPAuthenticationError:
+            has_fallback = index < len(candidates) - 1
+            if has_fallback:
+                logger.warning(
+                    "SMTP authentication failed for %s while sending email to %s; trying fallback credentials",
+                    source,
+                    to_email,
+                )
+                continue
+
+            logger.exception(
+                "SMTP authentication failed when sending email to %s; check provider credentials", to_email
+            )
+            return False
+        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError):
+            logger.exception("SMTP transport failed when sending email to %s; check mail server availability", to_email)
+            return False
+        except Exception:
+            logger.exception("Failed to send email to %s", to_email)
+            return False
+
+    return False
 
 
 # ── Branded HTML templates ────────────────────────────────────────────────────
