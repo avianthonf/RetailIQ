@@ -57,14 +57,17 @@ class Config:
     SMTP_USER = _first_env("SMTP_USER", "MAIL_USERNAME")
     SMTP_PASSWORD = _first_env("SMTP_PASSWORD", "MAIL_PASSWORD")
     SMTP_FROM = os.environ.get("SMTP_FROM", "noreply@retailiq.com")
-    EMAIL_ENABLED = os.environ.get(
-        "EMAIL_ENABLED",
-        "true"
-        if _first_env("ENVIRONMENT", "FLASK_ENV", default="development").lower() == "production"
-        and SMTP_USER
-        and SMTP_PASSWORD
-        else "false",
-    ).lower() == "true"
+    EMAIL_ENABLED = (
+        os.environ.get(
+            "EMAIL_ENABLED",
+            "true"
+            if _first_env("ENVIRONMENT", "FLASK_ENV", default="development").lower() == "production"
+            and SMTP_USER
+            and SMTP_PASSWORD
+            else "false",
+        ).lower()
+        == "true"
+    )
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")

@@ -164,4 +164,6 @@ def check_production_readiness():
 
     smtp_user, smtp_password = _get_mail_config(current_app.config)
     if not smtp_user or not smtp_password:
-        raise RuntimeError("SMTP_USER and SMTP_PASSWORD (or MAIL_USERNAME and MAIL_PASSWORD) are required in production")
+        raise RuntimeError(
+            "SMTP_USER and SMTP_PASSWORD (or MAIL_USERNAME and MAIL_PASSWORD) are required in production"
+        )

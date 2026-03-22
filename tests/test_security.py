@@ -361,6 +361,7 @@ def test_production_accepts_mail_aliases_for_email_credentials(monkeypatch):
 
         assert app.config.get("EMAIL_ENABLED") is True
 
+
 def test_development_mode_starts_with_defaults(monkeypatch):
     """Development mode must succeed with defaults."""
     with monkeypatch.context() as m:
