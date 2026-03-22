@@ -17,6 +17,7 @@ from app.models.finance_models import (
     MerchantKYC,
     PaymentTransaction,
     TreasuryConfig,
+    TreasuryTransaction,
 )
 
 from ..auth.decorators import require_auth, require_role
@@ -254,11 +255,60 @@ def treasury_balance():
         .filter_by(store_id=g.current_user["store_id"], account_type="RESERVE")
         .first()
     )
+    # Pull latest yield from the most recent treasury transaction for this store
+    latest_yield_tx = (
+        db.session.query(TreasuryTransaction)
+        .filter_by(store_id=g.current_user["store_id"], type="YIELD_ACCRUAL")
+        .order_by(TreasuryTransaction.created_at.desc())
+        .first()
+    )
+    yield_bps = latest_yield_tx.current_yield_bps if latest_yield_tx and latest_yield_tx.current_yield_bps else 450
+
     return jsonify(
         {
             "available": float(account.balance) if account else 0,
-            "yield_bps": 450,  # Mock 4.5%
+            "yield_bps": yield_bps,
             "currency": "INR",
+        }
+    ), 200
+
+
+@finance_bp.route("/treasury/config", methods=["GET"])
+@require_auth
+def get_treasury_config():
+    """Return treasury sweep configuration for the current store."""
+    store_id = g.current_user["store_id"]
+    config = db.session.query(TreasuryConfig).filter_by(store_id=store_id).first()
+
+    if not config:
+        return jsonify(
+            {
+                "auto_transfer_enabled": False,
+                "reserve_percentage": 0,
+                "daily_transfer_limit": 0,
+                "settlement_account_id": "",
+                "strategy": "OFF",
+            }
+        ), 200
+
+    reserve_account = db.session.query(FinancialAccount).filter_by(store_id=store_id, account_type="RESERVE").first()
+    operating_account = (
+        db.session.query(FinancialAccount).filter_by(store_id=store_id, account_type="OPERATING").first()
+    )
+    reserve_balance = float(reserve_account.balance) if reserve_account else 0
+    operating_balance = float(operating_account.balance) if operating_account else 0
+    total_balance = reserve_balance + operating_balance
+    reserve_percentage = (reserve_balance / total_balance * 100) if total_balance > 0 else 0
+
+    return jsonify(
+        {
+            "auto_transfer_enabled": bool(config.sweep_enabled and config.is_active),
+            "reserve_percentage": round(reserve_percentage, 2),
+            "daily_transfer_limit": float(config.min_balance_threshold or 0),
+            "settlement_account_id": str(config.sweep_target_account_id or ""),
+            "strategy": config.sweep_strategy or "OFF",
+            "sweep_threshold": float(config.sweep_threshold or 0),
+            "created_at": config.created_at.isoformat() if config.created_at else None,
         }
     ), 200
 
@@ -276,6 +326,62 @@ def update_sweep_config():
     )
     db.session.commit()
     return jsonify({"message": "Sweep config updated", "active": config.is_active}), 200
+
+
+@finance_bp.route("/treasury/transactions", methods=["GET"])
+@require_auth
+def get_treasury_transactions():
+    """List treasury transactions with a frontend-friendly history shape."""
+    store_id = g.current_user["store_id"]
+    limit = min(request.args.get("limit", 50, type=int), 200)
+
+    transactions = (
+        db.session.query(TreasuryTransaction)
+        .filter_by(store_id=store_id)
+        .order_by(TreasuryTransaction.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if transactions:
+        data = [
+            {
+                "id": txn.id,
+                "type": txn.type or txn.transaction_type or "TRANSFER_IN",
+                "amount": float(txn.amount),
+                "description": txn.transaction_type or txn.type or "Treasury transaction",
+                "status": txn.status or "COMPLETED",
+                "created_at": txn.created_at.isoformat() if txn.created_at else None,
+                "completed_at": txn.created_at.isoformat() if txn.created_at else None,
+            }
+            for txn in transactions
+        ]
+        return jsonify(data), 200
+
+    reserve_account = db.session.query(FinancialAccount).filter_by(store_id=store_id, account_type="RESERVE").first()
+    if not reserve_account:
+        return jsonify([]), 200
+
+    ledger_entries = (
+        db.session.query(LedgerEntry)
+        .filter_by(account_id=reserve_account.id)
+        .order_by(LedgerEntry.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    data = [
+        {
+            "id": entry.id,
+            "type": "TRANSFER_OUT" if entry.entry_type == "DEBIT" else "TRANSFER_IN",
+            "amount": float(entry.amount),
+            "description": entry.description or "Treasury ledger entry",
+            "status": "COMPLETED",
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "completed_at": entry.created_at.isoformat() if entry.created_at else None,
+        }
+        for entry in ledger_entries
+    ]
+    return jsonify(data), 200
 
 
 # ────────────────────────────────────────────────────────────────────────────

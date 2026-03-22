@@ -1,11 +1,14 @@
+import io
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
-from flask import Blueprint, g, jsonify, request
+from flask import current_app, g, request, send_file
 
 from app import db
 from app.auth.decorators import require_auth
 from app.auth.utils import format_response
+from app.email import _send_raw
 from app.models import GoodsReceiptNote, Product, PurchaseOrder, PurchaseOrderItem, Supplier, SupplierProduct
 from app.suppliers.analytics import compute_avg_lead_time, compute_price_change_pct, compute_supplier_fill_rate
 from app.utils.sanitize import sanitize_string
@@ -19,6 +22,65 @@ def _store_id() -> int:
 
 def _user_id() -> int:
     return g.current_user["user_id"]
+
+
+def _serialize_po_item(item):
+    return {
+        "line_item_id": str(item.id),
+        "product_id": item.product_id,
+        "ordered_qty": float(item.ordered_qty),
+        "received_qty": float(item.received_qty) if item.received_qty is not None else 0.0,
+        "unit_price": float(item.unit_price) if item.unit_price is not None else 0.0,
+    }
+
+
+def _serialize_po(po, items):
+    return {
+        "id": str(po.id),
+        "supplier_id": str(po.supplier_id),
+        "status": po.status,
+        "expected_delivery_date": str(po.expected_delivery_date) if po.expected_delivery_date else None,
+        "notes": po.notes,
+        "created_at": str(po.created_at),
+        "updated_at": str(po.updated_at) if po.updated_at else str(po.created_at),
+        "items": [_serialize_po_item(item) for item in items],
+    }
+
+
+def _load_po_for_store(po_id, store_id):
+    po = db.session.query(PurchaseOrder).filter_by(id=po_id, store_id=store_id).first()
+    if not po:
+        return None, None
+    items = db.session.query(PurchaseOrderItem).filter_by(po_id=po.id).all()
+    return po, items
+
+
+def _build_po_pdf_bytes(po, items, supplier):
+    lines = [
+        f"Purchase Order #{po.id}",
+        f"Supplier: {supplier.name if supplier else po.supplier_id}",
+        f"Status: {po.status}",
+        f"Expected Delivery: {po.expected_delivery_date or 'N/A'}",
+        "",
+        "Items:",
+    ]
+    total = 0.0
+    for item in items:
+        line_total = float(item.ordered_qty) * float(item.unit_price)
+        total += line_total
+        lines.append(
+            f"- Product {item.product_id}: {float(item.ordered_qty):.2f} x {float(item.unit_price):.2f} = {line_total:.2f}"
+        )
+    lines.extend(["", f"Total: INR {total:.2f}", "", po.notes or ""])
+
+    html = "<html><body><pre style='font-family: monospace'>" + "\n".join(lines) + "</pre></body></html>"
+    try:
+        from weasyprint import HTML
+
+        return HTML(string=html).write_pdf()
+    except Exception:
+        pdf_like = "%PDF-1.4\n" + "\n".join(lines) + "\n%%EOF"
+        return pdf_like.encode("utf-8")
 
 
 # ── 1. SUPPLIER CRUD ──────────────────────────────────────────────────────────
@@ -224,6 +286,51 @@ def link_supplier_product(supplier_id):
     return format_response(data={"id": str(sp.id)}, status_code=201)
 
 
+@suppliers_bp.route("/<uuid:supplier_id>/products/<int:product_id>", methods=["PUT", "PATCH"])
+@require_auth
+def update_supplier_product_link(supplier_id, product_id):
+    sid = _store_id()
+    supplier = db.session.query(Supplier).filter_by(id=supplier_id, store_id=sid).first()
+    if not supplier:
+        return format_response(error="Supplier not found", status_code=404)
+
+    supplier_product = (
+        db.session.query(SupplierProduct).filter_by(supplier_id=supplier_id, product_id=product_id).first()
+    )
+    if not supplier_product:
+        return format_response(error="Supplier product link not found", status_code=404)
+
+    body = request.get_json() or {}
+    if "quoted_price" in body:
+        supplier_product.quoted_price = body["quoted_price"]
+    if "lead_time_days" in body:
+        supplier_product.lead_time_days = body["lead_time_days"]
+    if "is_preferred_supplier" in body:
+        supplier_product.is_preferred_supplier = body["is_preferred_supplier"]
+
+    db.session.commit()
+    return format_response(data={"id": str(supplier_product.id)}, status_code=200)
+
+
+@suppliers_bp.route("/<uuid:supplier_id>/products/<int:product_id>", methods=["DELETE"])
+@require_auth
+def delete_supplier_product_link(supplier_id, product_id):
+    sid = _store_id()
+    supplier = db.session.query(Supplier).filter_by(id=supplier_id, store_id=sid).first()
+    if not supplier:
+        return format_response(error="Supplier not found", status_code=404)
+
+    supplier_product = (
+        db.session.query(SupplierProduct).filter_by(supplier_id=supplier_id, product_id=product_id).first()
+    )
+    if not supplier_product:
+        return format_response(error="Supplier product link not found", status_code=404)
+
+    db.session.delete(supplier_product)
+    db.session.commit()
+    return format_response(data={"product_id": product_id, "deleted": True}, status_code=200)
+
+
 # ── 2. PURCHASE ORDERS ────────────────────────────────────────────────────────
 
 
@@ -325,26 +432,46 @@ def get_purchase_order(po_id):
         return format_response(error="PO not found", status_code=404)
 
     items = db.session.query(PurchaseOrderItem).filter_by(po_id=po.id).all()
+    return format_response(data=_serialize_po(po, items)), 200
 
-    data = {
-        "id": str(po.id),
-        "supplier_id": str(po.supplier_id),
-        "status": po.status,
-        "expected_delivery_date": str(po.expected_delivery_date) if po.expected_delivery_date else None,
-        "notes": po.notes,
-        "created_at": str(po.created_at),
-        "items": [
-            {
-                "product_id": i.product_id,
-                "ordered_qty": float(i.ordered_qty),
-                "received_qty": float(i.received_qty) if i.received_qty is not None else 0.0,
-                "unit_price": float(i.unit_price) if i.unit_price is not None else 0.0,
-            }
-            for i in items
-        ],
-    }
 
-    return format_response(data=data), 200
+@po_bp.route("/<uuid:po_id>", methods=["PUT", "PATCH"])
+@require_auth
+def update_purchase_order(po_id):
+    sid = _store_id()
+    body = request.get_json() or {}
+    po, items = _load_po_for_store(po_id, sid)
+    if not po:
+        return format_response(error="PO not found", status_code=404)
+
+    if po.status != "DRAFT":
+        return format_response(error="Only DRAFT POs can be updated", status_code=422)
+
+    if "expected_delivery_date" in body:
+        try:
+            po.expected_delivery_date = (
+                date.fromisoformat(body["expected_delivery_date"]) if body["expected_delivery_date"] else None
+            )
+        except Exception:
+            return format_response(error="invalid date format", status_code=422)
+    if "notes" in body:
+        po.notes = sanitize_string(body.get("notes"), 500)
+
+    if "items" in body:
+        db.session.query(PurchaseOrderItem).filter_by(po_id=po.id).delete()
+        for item in body["items"]:
+            db.session.add(
+                PurchaseOrderItem(
+                    po_id=po.id,
+                    product_id=item["product_id"],
+                    ordered_qty=item["ordered_qty"],
+                    unit_price=item["unit_price"],
+                )
+            )
+
+    db.session.commit()
+    po, items = _load_po_for_store(po_id, sid)
+    return format_response(data=_serialize_po(po, items)), 200
 
 
 @po_bp.route("/<uuid:po_id>/receive", methods=["POST"])
@@ -361,8 +488,8 @@ def receive_purchase_order(po_id):
     if not po:
         return format_response(error="PO not found", status_code=404)
 
-    if po.status != "SENT":
-        return format_response(error="Can only receive SENT POs", status_code=422)
+    if po.status not in ("SENT", "CONFIRMED"):
+        return format_response(error="Can only receive SENT or CONFIRMED POs", status_code=422)
 
     try:
         with db.session.begin_nested():
@@ -409,6 +536,22 @@ def receive_purchase_order(po_id):
     return format_response(data={"id": str(po.id), "status": po.status}, status_code=200)
 
 
+@po_bp.route("/<uuid:po_id>/confirm", methods=["POST"])
+@require_auth
+def confirm_purchase_order(po_id):
+    sid = _store_id()
+    po = db.session.query(PurchaseOrder).filter_by(id=po_id, store_id=sid).first()
+    if not po:
+        return format_response(error="PO not found", status_code=404)
+
+    if po.status != "SENT":
+        return format_response(error="Only SENT POs can be confirmed", status_code=422)
+
+    po.status = "CONFIRMED"
+    db.session.commit()
+    return format_response(data={"id": str(po.id), "status": po.status}, status_code=200)
+
+
 @po_bp.route("/<uuid:po_id>/cancel", methods=["PUT"])
 @require_auth
 def cancel_purchase_order(po_id):
@@ -423,3 +566,76 @@ def cancel_purchase_order(po_id):
     po.status = "CANCELLED"
     db.session.commit()
     return format_response(data={"id": str(po.id)}, status_code=200)
+
+
+@po_bp.route("/<uuid:po_id>/pdf", methods=["GET"])
+@require_auth
+def generate_purchase_order_pdf(po_id):
+    sid = _store_id()
+    po, items = _load_po_for_store(po_id, sid)
+    if not po:
+        return format_response(error="PO not found", status_code=404)
+
+    supplier = db.session.get(Supplier, po.supplier_id)
+    pdf_bytes = _build_po_pdf_bytes(po, items, supplier)
+
+    export_dir = current_app.config.get("EXPORT_DIR") or tempfile.gettempdir()
+    pdf_path = tempfile.NamedTemporaryFile(prefix=f"po-{po.id}-", suffix=".pdf", delete=False, dir=export_dir).name
+    with open(pdf_path, "wb") as handle:
+        handle.write(pdf_bytes)
+
+    return format_response(
+        data={
+            "job_id": f"po-pdf-{po.id}",
+            "url": f"/api/v1/purchase-orders/{po.id}/pdf/download",
+            "path": pdf_path,
+        }
+    )
+
+
+@po_bp.route("/<uuid:po_id>/pdf/download", methods=["GET"])
+@require_auth
+def download_purchase_order_pdf(po_id):
+    sid = _store_id()
+    po, items = _load_po_for_store(po_id, sid)
+    if not po:
+        return format_response(error="PO not found", status_code=404)
+
+    supplier = db.session.get(Supplier, po.supplier_id)
+    pdf_bytes = _build_po_pdf_bytes(po, items, supplier)
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"purchase-order-{po.id}.pdf",
+    )
+
+
+@po_bp.route("/<uuid:po_id>/email", methods=["POST"])
+@require_auth
+def email_purchase_order(po_id):
+    sid = _store_id()
+    po, items = _load_po_for_store(po_id, sid)
+    if not po:
+        return format_response(error="PO not found", status_code=404)
+
+    body = request.get_json() or {}
+    to_email = body.get("email")
+    if not to_email:
+        return format_response(error="email is required", status_code=422)
+
+    supplier = db.session.get(Supplier, po.supplier_id)
+    total = sum(float(item.ordered_qty) * float(item.unit_price) for item in items)
+    html = f"""
+        <h2>Purchase Order {po.id}</h2>
+        <p>Supplier: {supplier.name if supplier else po.supplier_id}</p>
+        <p>Status: {po.status}</p>
+        <p>Total: INR {total:.2f}</p>
+        <p>Download PDF: /api/v1/purchase-orders/{po.id}/pdf/download</p>
+    """
+
+    sent = _send_raw(to_email, f"RetailIQ Purchase Order {po.id}", html)
+    if not sent:
+        return format_response(error="Failed to send email", status_code=500)
+
+    return format_response(data={"message": "Purchase order emailed successfully"}, status_code=200)

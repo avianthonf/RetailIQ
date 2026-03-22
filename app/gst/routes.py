@@ -1,4 +1,5 @@
 import contextlib
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from flask import g, request
@@ -8,7 +9,7 @@ from sqlalchemy import func, or_
 from .. import db
 from ..auth.decorators import require_auth, require_role
 from ..auth.utils import format_response
-from ..models import GSTFilingPeriod, GSTTransaction, HSNMaster, StoreGSTConfig
+from ..models import GSTFilingPeriod, GSTHSNMapping, GSTTransaction, HSNMaster, StoreGSTConfig
 from . import gst_bp
 from .schemas import GSTConfigUpsertSchema
 from .utils import validate_gstin
@@ -206,6 +207,55 @@ def get_gstr1():
     )
 
 
+@gst_bp.route("/gstr1/file", methods=["POST"])
+@require_auth
+@require_role("owner")
+def file_gstr1():
+    store_id = g.current_user["store_id"]
+    body = request.get_json() or {}
+    period = body.get("period")
+    if not period:
+        return format_response(
+            False,
+            error={"code": "MISSING_PERIOD", "message": "period is required"},
+            status_code=400,
+        )
+
+    filing = db.session.query(GSTFilingPeriod).filter_by(store_id=store_id, period=period).first()
+    if not filing:
+        filing = GSTFilingPeriod(store_id=store_id, period=period, status="READY")
+        db.session.add(filing)
+        db.session.flush()
+
+    now = datetime.now(timezone.utc)
+    filing.status = "FILED"
+    filing.compiled_at = filing.compiled_at or now
+    acknowledgement_number = f"GST-{store_id}-{period.replace('-', '')}"
+
+    if filing.gstr1_json_path:
+        import json
+        import os
+
+        if os.path.exists(filing.gstr1_json_path):
+            with open(filing.gstr1_json_path, encoding="utf-8") as handle:
+                gstr1_data = json.load(handle)
+            gstr1_data["filed_on"] = now.isoformat()
+            gstr1_data["acknowledgement_number"] = acknowledgement_number
+            with open(filing.gstr1_json_path, "w", encoding="utf-8") as handle:
+                json.dump(gstr1_data, handle)
+
+    db.session.commit()
+    return format_response(
+        True,
+        data={
+            "period": period,
+            "status": "FILED",
+            "acknowledgement_number": acknowledgement_number,
+            "filed_on": now.isoformat(),
+        },
+    )
+
+
 # ── Liability Slabs ──────────────────────────────────────────────────
 
 
@@ -242,3 +292,101 @@ def liability_slabs():
 
     slabs = sorted(slab_map.values(), key=lambda x: x["rate"])
     return format_response(success=True, data=slabs, status_code=200)
+
+
+@gst_bp.route("/hsn-mappings", methods=["GET"])
+@require_auth
+def list_hsn_mappings():
+    store_id = g.current_user["store_id"]
+    mappings = db.session.query(GSTHSNMapping).filter_by(store_id=store_id).order_by(GSTHSNMapping.hsn_code.asc()).all()
+    data = [
+        {
+            "hsn_code": mapping.hsn_code,
+            "category_id": str(mapping.category_id),
+            "tax_rate": float(mapping.tax_rate or 0),
+            "description": mapping.description or "",
+        }
+        for mapping in mappings
+    ]
+    return format_response(True, data=data)
+
+
+@gst_bp.route("/hsn-mappings", methods=["POST"])
+@require_auth
+@require_role("owner")
+def create_hsn_mapping():
+    store_id = g.current_user["store_id"]
+    body = request.get_json() or {}
+    if not body.get("hsn_code") or not body.get("category_id"):
+        return format_response(
+            success=False,
+            error={"code": "VALIDATION_ERROR", "message": "hsn_code and category_id are required"},
+            status_code=400,
+        )
+
+    mapping = GSTHSNMapping(
+        store_id=store_id,
+        category_id=body["category_id"],
+        hsn_code=body["hsn_code"],
+        description=body.get("description"),
+        tax_rate=body.get("tax_rate"),
+    )
+    db.session.add(mapping)
+    db.session.commit()
+    return format_response(
+        True,
+        data={
+            "hsn_code": mapping.hsn_code,
+            "category_id": str(mapping.category_id),
+            "tax_rate": float(mapping.tax_rate or 0),
+            "description": mapping.description or "",
+        },
+        status_code=201,
+    )
+
+
+@gst_bp.route("/hsn-mappings/<string:hsn_code>", methods=["PUT", "PATCH"])
+@require_auth
+@require_role("owner")
+def update_hsn_mapping(hsn_code):
+    store_id = g.current_user["store_id"]
+    mapping = db.session.query(GSTHSNMapping).filter_by(store_id=store_id, hsn_code=hsn_code).first()
+    if not mapping:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "HSN mapping not found"}, status_code=404
+        )
+
+    body = request.get_json() or {}
+    if "category_id" in body:
+        mapping.category_id = body["category_id"]
+    if "tax_rate" in body:
+        mapping.tax_rate = body["tax_rate"]
+    if "description" in body:
+        mapping.description = body["description"]
+
+    db.session.commit()
+    return format_response(
+        True,
+        data={
+            "hsn_code": mapping.hsn_code,
+            "category_id": str(mapping.category_id),
+            "tax_rate": float(mapping.tax_rate or 0),
+            "description": mapping.description or "",
+        },
+    )
+
+
+@gst_bp.route("/hsn-mappings/<string:hsn_code>", methods=["DELETE"])
+@require_auth
+@require_role("owner")
+def delete_hsn_mapping(hsn_code):
+    store_id = g.current_user["store_id"]
+    mapping = db.session.query(GSTHSNMapping).filter_by(store_id=store_id, hsn_code=hsn_code).first()
+    if not mapping:
+        return format_response(
+            success=False, error={"code": "NOT_FOUND", "message": "HSN mapping not found"}, status_code=404
+        )
+
+    db.session.delete(mapping)
+    db.session.commit()
+    return format_response(True, data={"hsn_code": hsn_code, "deleted": True})

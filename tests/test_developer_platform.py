@@ -287,6 +287,79 @@ def test_oauth_invalid_credentials(client, developer_account):
     assert resp.get_json()["error"] == "invalid_client"
 
 
+def test_oauth_authorize_json_flow(client, developer_account):
+    """SPA-friendly OAuth authorize flow returns request metadata and redirect_url JSON."""
+    headers = _get_auth_header(developer_account)
+    redirect_uri = "https://app.example.com/oauth/callback"
+
+    app_resp = client.post(
+        "/api/v1/developer/apps",
+        json={
+            "name": "Consent App",
+            "description": "Needs delegated access",
+            "app_type": "WEB",
+            "redirect_uris": [redirect_uri],
+            "scopes": ["read:inventory", "read:sales"],
+        },
+        headers=headers,
+    )
+    assert app_resp.status_code == 201
+    creds = app_resp.get_json()["data"]
+
+    preview_resp = client.get(
+        "/oauth/authorize",
+        query_string={
+            "client_id": creds["client_id"],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "read:inventory read:sales",
+            "state": "xyz",
+        },
+        headers=headers,
+    )
+    assert preview_resp.status_code == 200
+    preview_data = preview_resp.get_json()["data"]
+    assert preview_data["client_id"] == creds["client_id"]
+    assert preview_data["app_name"] == "Consent App"
+    assert preview_data["redirect_uri"] == redirect_uri
+    assert preview_data["scopes"] == ["read:inventory", "read:sales"]
+    assert preview_data["state"] == "xyz"
+
+    approve_resp = client.post(
+        "/oauth/authorize",
+        query_string={
+            "client_id": creds["client_id"],
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "read:inventory read:sales",
+            "state": "xyz",
+        },
+        json={"confirm": True},
+        headers=headers,
+    )
+    assert approve_resp.status_code == 200
+    approve_data = approve_resp.get_json()["data"]
+    assert approve_data["state"] == "xyz"
+    assert approve_data["redirect_url"].startswith(f"{redirect_uri}?code=")
+
+    auth_code = approve_data["redirect_url"].split("code=", 1)[1].split("&", 1)[0]
+
+    token_resp = client.post(
+        "/oauth/token",
+        json={
+            "grant_type": "authorization_code",
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "code": auth_code,
+            "redirect_uri": redirect_uri,
+        },
+    )
+    assert token_resp.status_code == 200
+    token_data = token_resp.get_json()
+    assert "access_token" in token_data
+    assert token_data["token_type"] == "Bearer"
+
+
 @patch("app.transactions.services.rebuild_daily_aggregates.delay")
 @patch("app.transactions.services.evaluate_alerts.delay")
 @patch("app.utils.webhooks.deliver_webhook.delay")

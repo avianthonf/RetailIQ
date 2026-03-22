@@ -199,21 +199,46 @@ def credit_overdue_alerts():
 
 
 class _RedisLock:
-    """Helper for distributed locking in tasks/engines."""
+    """Distributed lock backed by Redis SET NX EX.
+
+    Falls back to an always-acquired in-process lock when Redis is
+    unavailable so that single-worker deployments still function.
+    """
 
     def __init__(self, key, expiry=60):
-        self.key = key
+        self.key = f"retailiq:lock:{key}"
         self.expiry = expiry
+        self._acquired = False
+        self._redis = None
 
     def __enter__(self):
+        try:
+            from app.utils.redis import get_redis_client
+
+            self._redis = get_redis_client()
+        except Exception:
+            self._redis = None
+
+        if self._redis is not None:
+            try:
+                self._acquired = bool(self._redis.set(self.key, "1", nx=True, ex=self.expiry))
+            except Exception:
+                logger.warning("Redis lock acquire failed for %s, proceeding without lock", self.key)
+                self._acquired = True
+        else:
+            self._acquired = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        if self._redis is not None and self._acquired:
+            try:
+                self._redis.delete(self.key)
+            except Exception:
+                logger.warning("Redis lock release failed for %s", self.key)
 
     @property
     def locked(self):
-        return True
+        return self._acquired
 
 
 def _generic_task_stub(*args, **kwargs):
