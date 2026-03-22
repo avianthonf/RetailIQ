@@ -44,7 +44,7 @@ jobs:
       - name: Install essential tools only
         run: |
           source .venv/bin/activate
-          uv pip install ruff==0.15.6 pytest==8.1.1
+          uv pip install --upgrade ruff pytest==8.1.1
           uv pip install -r requirements.txt
 
       - name: Ruff check (lint only)
