@@ -1,9 +1,36 @@
 import logging
 import os
+import re
 import sys
 
 from flask import Flask, jsonify
 from flask_cors import CORS
+
+_SENSITIVE_PATTERNS = re.compile(
+    r'((?:access_token|password|secret|api_key|token)\s*[=:]\s*)\S+',
+    re.IGNORECASE,
+)
+_SENSITIVE_REPLACE = r'\1***REDACTED***'
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Redact sensitive values from log records before emission."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.msg, record.args = self._redact_msg_args(record.msg, record.args)
+        else:
+            record.msg = _SENSITIVE_PATTERNS.sub(_SENSITIVE_REPLACE, str(record.msg))
+        return True
+
+    @staticmethod
+    def _redact_msg_args(msg, args):
+        try:
+            formatted = msg % args if args else str(msg)
+        except (TypeError, ValueError):
+            return msg, args
+        redacted = _SENSITIVE_PATTERNS.sub(_SENSITIVE_REPLACE, formatted)
+        return redacted, None
 
 
 def create_app(config_object=None):
@@ -53,18 +80,22 @@ def create_app(config_object=None):
         stdout_handler.setLevel(log_level)
         stdout_handler.setFormatter(log_fmt)
 
+        _sensitive_filter = SensitiveDataFilter()
+
         # Configure root logger so ALL library loggers (smtplib, etc.) are captured
         root_logger = logging.getLogger()
         root_logger.setLevel(log_level)
         # Remove any pre-existing handlers to avoid duplicates
         root_logger.handlers.clear()
         root_logger.addHandler(stdout_handler)
+        root_logger.addFilter(_sensitive_filter)
 
         # Ensure Flask's own logger also uses stdout
         app.logger.handlers.clear()
         app.logger.addHandler(stdout_handler)
         app.logger.setLevel(log_level)
         app.logger.propagate = False
+        app.logger.addFilter(_sensitive_filter)
 
         # ── Extensions ─────────────────────────────────────────────────────────
         db.init_app(app)

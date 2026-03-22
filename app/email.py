@@ -109,7 +109,7 @@ def _send_raw(to_email, subject, html_body):
         return True
 
     host = current_app.config.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(current_app.config.get("SMTP_PORT", 465))
+    port = int(current_app.config.get("SMTP_PORT", SMTP_PORT))
     use_ssl = port == 465
 
     logger.info(
