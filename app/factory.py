@@ -44,11 +44,27 @@ def create_app(config_object=None):
         if db_url and db_url.startswith("postgres://"):
             app.config["SQLALCHEMY_DATABASE_URI"] = db_url.replace("postgres://", "postgresql://", 1)
 
-        # ── Logging ────────────────────────────────────────────────────────────
-        logging.basicConfig(
-            level=logging.DEBUG if app.config.get("DEBUG") else logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        )
+        # ── Logging (stdout for Railway / Docker log capture) ────────────────
+        log_level = logging.DEBUG if app.config.get("DEBUG") else logging.INFO
+        log_fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+        # Explicit stdout handler — Railway/Docker only capture stdout/stderr
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(log_level)
+        stdout_handler.setFormatter(log_fmt)
+
+        # Configure root logger so ALL library loggers (smtplib, etc.) are captured
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_level)
+        # Remove any pre-existing handlers to avoid duplicates
+        root_logger.handlers.clear()
+        root_logger.addHandler(stdout_handler)
+
+        # Ensure Flask's own logger also uses stdout
+        app.logger.handlers.clear()
+        app.logger.addHandler(stdout_handler)
+        app.logger.setLevel(log_level)
+        app.logger.propagate = False
 
         # ── Extensions ─────────────────────────────────────────────────────────
         db.init_app(app)

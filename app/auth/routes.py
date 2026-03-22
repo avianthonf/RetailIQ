@@ -477,3 +477,64 @@ def reset_password():
     db.session.commit()
 
     return format_response(data={"message": "Password reset successfully."})
+
+
+@auth_bp.route("/email-health", methods=["GET"])
+def email_health():
+    """Diagnostic endpoint to test SMTP connectivity without sending a real email."""
+    import smtplib
+    import time
+
+    host = current_app.config.get("SMTP_HOST", "smtp.gmail.com")
+    port = int(current_app.config.get("SMTP_PORT", 465))
+    use_ssl = port == 465
+
+    from ..email import _get_mail_candidates
+
+    candidates = _get_mail_candidates()
+    email_enabled = bool(current_app.config.get("EMAIL_ENABLED"))
+
+    if not candidates:
+        return format_response(
+            success=False,
+            message="No SMTP credentials configured",
+            status_code=503,
+            data={"email_enabled": email_enabled, "host": host, "port": port},
+        )
+
+    source, username, _password = candidates[0]
+    result = {
+        "email_enabled": email_enabled,
+        "host": host,
+        "port": port,
+        "ssl": use_ssl,
+        "credential_source": source,
+        "smtp_user": username,
+    }
+
+    start = time.monotonic()
+    try:
+        if use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=15) as server:
+                server.ehlo()
+                server.login(username, _password)
+                server.noop()
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(username, _password)
+                server.noop()
+        elapsed = round((time.monotonic() - start) * 1000)
+        result["status"] = "ok"
+        result["latency_ms"] = elapsed
+        return format_response(data=result)
+    except Exception as exc:
+        elapsed = round((time.monotonic() - start) * 1000)
+        result["status"] = "error"
+        result["error_type"] = type(exc).__name__
+        result["error_detail"] = str(exc)
+        result["latency_ms"] = elapsed
+        logger.error("[EMAIL-HEALTH] SMTP check failed: %s: %s", type(exc).__name__, exc)
+        return format_response(success=False, message="SMTP connection failed", status_code=503, data=result)

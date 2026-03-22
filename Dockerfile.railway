@@ -14,6 +14,9 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 app
 
 WORKDIR /app
 
+# ── Prevent Python output buffering (critical for Railway log capture) ───────
+ENV PYTHONUNBUFFERED=1
+
 # ── Python dependencies ───────────────────────────────────────────────────────
 RUN pip install --no-cache-dir --upgrade pip
 

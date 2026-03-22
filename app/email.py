@@ -109,7 +109,17 @@ def _send_raw(to_email, subject, html_body):
         return True
 
     host = current_app.config.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(current_app.config.get("SMTP_PORT", 587))
+    port = int(current_app.config.get("SMTP_PORT", 465))
+    use_ssl = port == 465
+
+    logger.info(
+        "[EMAIL] Attempting send to %s via %s:%d (SSL=%s, candidates=%d)",
+        to_email,
+        host,
+        port,
+        use_ssl,
+        len(candidates),
+    )
 
     for index, (source, username, password) in enumerate(candidates):
         msg = MIMEMultipart("alternative")
@@ -119,33 +129,47 @@ def _send_raw(to_email, subject, html_body):
         msg.attach(MIMEText(html_body, "html"))
 
         try:
-            with smtplib.SMTP(host, port, timeout=15) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(username, password)
-                server.sendmail(username, to_email, msg.as_string())
-            logger.info("Email sent to %s [%s] using %s", to_email, subject, source)
+            if use_ssl:
+                # Port 465: direct SSL — required for Railway / GCP (port 587 blocked)
+                with smtplib.SMTP_SSL(host, port, timeout=30) as server:
+                    server.ehlo()
+                    server.login(username, password)
+                    server.sendmail(username, to_email, msg.as_string())
+            else:
+                # Port 587: STARTTLS — works locally and on some cloud providers
+                with smtplib.SMTP(host, port, timeout=30) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                    server.login(username, password)
+                    server.sendmail(username, to_email, msg.as_string())
+            logger.info("[EMAIL] Sent to %s [%s] using %s", to_email, subject, source)
             return True
-        except smtplib.SMTPAuthenticationError:
+        except smtplib.SMTPAuthenticationError as exc:
             has_fallback = index < len(candidates) - 1
             if has_fallback:
                 logger.warning(
-                    "SMTP authentication failed for %s while sending email to %s; trying fallback credentials",
+                    "[EMAIL] Auth failed for %s (%s) sending to %s; trying fallback",
                     source,
+                    exc,
                     to_email,
                 )
                 continue
 
+            logger.exception("[EMAIL] Auth failed for %s sending to %s; check provider credentials", source, to_email)
+            return False
+        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError) as exc:
             logger.exception(
-                "SMTP authentication failed when sending email to %s; check provider credentials", to_email
+                "[EMAIL] Transport failed (%s: %s) sending to %s via %s:%d",
+                type(exc).__name__,
+                exc,
+                to_email,
+                host,
+                port,
             )
             return False
-        except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError, OSError):
-            logger.exception("SMTP transport failed when sending email to %s; check mail server availability", to_email)
-            return False
-        except Exception:
-            logger.exception("Failed to send email to %s", to_email)
+        except Exception as exc:
+            logger.exception("[EMAIL] Unexpected error (%s: %s) sending to %s", type(exc).__name__, exc, to_email)
             return False
 
     return False
