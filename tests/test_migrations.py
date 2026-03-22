@@ -78,9 +78,9 @@ class TestReconcileMigrationTypes:
         # Find the create_table block for this table and verify the column
         # uses sa.Text() — a simple check that the column name appears near sa.Text()
         pattern = rf'"{column}".*?sa\.Text\(\)'
-        assert re.search(
-            pattern, content, re.DOTALL
-        ), f"Column '{table}.{column}' should use sa.Text() in reconcile migration"
+        assert re.search(pattern, content, re.DOTALL), (
+            f"Column '{table}.{column}' should use sa.Text() in reconcile migration"
+        )
 
 
 # ===========================================================================
@@ -239,9 +239,9 @@ class TestModelColumnTypes:
                 break
         assert model is not None, f"Model '{model_name}' not found in registry"
         col = model.__table__.columns[column_name]
-        assert isinstance(
-            col.type, expected_type
-        ), f"{model_name}.{column_name} should be {expected_type.__name__}, got {type(col.type).__name__}"
+        assert isinstance(col.type, expected_type), (
+            f"{model_name}.{column_name} should be {expected_type.__name__}, got {type(col.type).__name__}"
+        )
 
     @pytest.mark.parametrize(
         "model_name,column_name",
@@ -263,9 +263,9 @@ class TestModelColumnTypes:
                 break
         assert model is not None, f"Model '{model_name}' not found in registry"
         col = model.__table__.columns[column_name]
-        assert isinstance(
-            col.type, sa.DateTime
-        ), f"{model_name}.{column_name} should be DateTime, got {type(col.type).__name__}"
+        assert isinstance(col.type, sa.DateTime), (
+            f"{model_name}.{column_name} should be DateTime, got {type(col.type).__name__}"
+        )
 
 
 # ===========================================================================
@@ -302,9 +302,9 @@ class TestAlembicCheck:
             text=True,
             timeout=120,
         )
-        assert (
-            result.returncode == 0
-        ), f"alembic check detected drift:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"alembic check detected drift:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
         assert "No new upgrade operations detected" in (result.stdout + result.stderr)
 
 
